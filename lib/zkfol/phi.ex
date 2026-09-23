@@ -173,7 +173,7 @@ defmodule Zkfol.Phi do
           for(bank = %Bank{} <- walk.members, do: runs(bank))
       )
 
-    {pred, members} = Zkfol.Nodes.lower(Value.shaped(pred, walk.shapes), walk.members)
+    {pred, members} = Zkfol.Nodes.lower(pred, walk.members)
     {:ok, pred, Alloc.numbered(members, name), walk}
   catch
     {:refused, refusal} -> {:error, refusal}
