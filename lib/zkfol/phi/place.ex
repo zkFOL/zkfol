@@ -24,7 +24,7 @@ defmodule Zkfol.Phi.Place do
   - `is_laid/1`: the guard for a list in a bank, `along` or `held`.
   - `slice/3`, `shifted/2`: one element of a list in a bank, and the list past `i`.
   - `extent/1`, `count/1`, `width/2`, `elements/2`, `size/2`: what a list in a bank holds.
-  - `stepped/2`, `presence/1`, `bounded/2`: a list re-headed along the trace, and its presence.
+  - `stepped/2`, `presence/1`: a list re-headed along the trace, and its presence.
   - `address/1`, `headed/2`: the column form of a list's head, and the list with its head at an address.
   - `resolved/2`: an element read across rows, as far as its bank's shape is known.
   - `fresh?/1`: whether nothing has bound the place.
@@ -218,13 +218,6 @@ defmodule Zkfol.Phi.Place do
     {bank, _first} = elem(laid, 1)
     at({:in, bank}, address(laid))
   end
-
-  @doc "I return the equations holding a list in a bank to exactly `n` elements."
-  @spec bounded(t(), non_neg_integer()) :: [Ast.pred()]
-  def bounded(laid, 0), do: [Ast.eq(presence(laid), 0)]
-
-  def bounded(laid, n),
-    do: [Ast.eq(presence(laid), 1), Ast.eq(presence(shifted(laid, n)), 0)]
 
   @doc "I return a list in a bank past its first `i` elements."
   @spec shifted(t(), integer()) :: t()
