@@ -251,7 +251,13 @@ defmodule Zkfol.Lang do
         end
       end
 
-    rels ++ [program]
+    relations =
+      quote do
+        @doc false
+        def __relations__, do: unquote(names)
+      end
+
+    rels ++ [program, relations]
   end
 
   @spec lines(Macro.t()) :: [Macro.t()]
@@ -390,11 +396,12 @@ defmodule Zkfol.Lang do
         do: {name, home, needed?}
       )
 
+  # Only a relation the module defines answers, never another function of its name.
   @spec pulled(atom(), [module() | nil]) :: Rel.t() | nil
   defp pulled(name, sources) do
     Enum.find_value(sources, fn source ->
-      source && Code.ensure_loaded?(source) && function_exported?(source, name, 0) &&
-        apply(source, name, [])
+      source && Code.ensure_loaded?(source) && function_exported?(source, :__relations__, 0) &&
+        name in source.__relations__() && apply(source, name, [])
     end)
   end
 end
