@@ -67,26 +67,37 @@ defmodule Zkfol.Lang do
   end
 
   defmacro __before_compile__(env) do
-    env.module
-    |> Module.get_attribute(:lang_clauses)
-    |> Enum.reverse()
-    |> Enum.group_by(&elem(&1, 0))
-    |> Enum.map(fn {name, entries} ->
-      clauses = for {_name, clause, _phi, _al} <- entries, do: clause
+    grouped =
+      env.module
+      |> Module.get_attribute(:lang_clauses)
+      |> Enum.reverse()
+      |> Enum.group_by(&elem(&1, 0))
 
-      rel = %Rel{
-        name: name,
-        arity: clauses |> hd() |> elem(0) |> length(),
-        clauses: clauses,
-        home: env.module,
-        phi: Enum.find_value(entries, &elem(&1, 2)),
-        al: Enum.find_value(entries, &elem(&1, 3))
-      }
-
+    relations =
       quote do
-        def unquote(name)(), do: unquote(Macro.escape(rel))
+        @doc false
+        def __relations__, do: unquote(Map.keys(grouped))
       end
-    end)
+
+    rels =
+      Enum.map(grouped, fn {name, entries} ->
+        clauses = for {_name, clause, _phi, _al} <- entries, do: clause
+
+        rel = %Rel{
+          name: name,
+          arity: clauses |> hd() |> elem(0) |> length(),
+          clauses: clauses,
+          home: env.module,
+          phi: Enum.find_value(entries, &elem(&1, 2)),
+          al: Enum.find_value(entries, &elem(&1, 3))
+        }
+
+        quote do
+          def unquote(name)(), do: unquote(Macro.escape(rel))
+        end
+      end)
+
+    rels ++ [relations]
   end
 
   @spec clause([Macro.t()], [Macro.t()], Macro.Env.t()) :: {[term()], [term()]}
@@ -300,11 +311,12 @@ defmodule Zkfol.Lang do
     end
   end
 
+  # Only a relation the module defines answers, never another function of its name.
   @spec pulled(atom(), [module() | nil]) :: Rel.t() | nil
   defp pulled(name, sources) do
     Enum.find_value(sources, fn source ->
-      source && Code.ensure_loaded?(source) && function_exported?(source, name, 0) &&
-        apply(source, name, [])
+      source && Code.ensure_loaded?(source) && function_exported?(source, :__relations__, 0) &&
+        name in source.__relations__() && apply(source, name, [])
     end)
   end
 end
