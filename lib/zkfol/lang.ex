@@ -31,34 +31,69 @@ defmodule Zkfol.Lang do
 
   @doc "I build a relation where a function runs, `^` splicing the scope's values in."
   defmacro rel(name, do: block) do
-    clauses = for form <- lines(block), do: rel_clause(name, aliased(form, __CALLER__))
-    arity = clauses |> hd() |> elem(0) |> length()
+    clauses = for form <- lines(block), do: rel_clause(name, form, __CALLER__)
 
     quote do
       %Zkfol.Lang.Rel{
         name: unquote(name),
-        arity: unquote(arity),
+        arity: unquote(clauses |> hd() |> elem(0) |> length()),
         clauses: unquote(Macro.escape(clauses, unquote: true)),
         home: __MODULE__
       }
     end
   end
 
-  @spec rel_clause(atom(), Macro.t()) :: {[term()], [term()]}
-  defp rel_clause(name, {name, _meta, args}) do
-    args = anonymous(List.wrap(args))
-
-    case List.last(args) do
-      [do: block] ->
-        {args |> Enum.drop(-1) |> Enum.map(&term/1), block |> lines() |> goals()}
-
-      _bare ->
-        {Enum.map(args, &term/1), []}
+  @spec rel_clause(atom(), Macro.t(), Macro.Env.t()) :: {[term()], [term()]}
+  defp rel_clause(name, {name, _meta, args}, env) do
+    case Enum.split(List.wrap(args), -1) do
+      {head, [[do: block]]} -> clause(head, lines(block), env)
+      _fact -> clause(List.wrap(args), [], env)
     end
   end
 
-  defp rel_clause(name, {other, _meta, _args}),
+  defp rel_clause(name, {other, _meta, _args}, _env),
     do: raise(ArgumentError, "the clause #{other} does not belong to the relation #{name}")
+
+  # The `@phi` and `@al` written above a clause belong to its relation.
+  @spec store(Macro.t(), [Macro.t()], Macro.Env.t()) :: Macro.t()
+  defp store({name, _meta, args}, body, env) do
+    clause = clause(List.wrap(args), body, env)
+
+    quote do
+      @lang_clauses {unquote(name), unquote(Macro.escape(clause, unquote: true)),
+                     Module.delete_attribute(__MODULE__, :phi),
+                     Module.delete_attribute(__MODULE__, :al)}
+    end
+  end
+
+  defmacro __before_compile__(env) do
+    env.module
+    |> Module.get_attribute(:lang_clauses)
+    |> Enum.reverse()
+    |> Enum.group_by(&elem(&1, 0))
+    |> Enum.map(fn {name, entries} ->
+      clauses = for {_name, clause, _phi, _al} <- entries, do: clause
+
+      rel = %Rel{
+        name: name,
+        arity: clauses |> hd() |> elem(0) |> length(),
+        clauses: clauses,
+        home: env.module,
+        phi: Enum.find_value(entries, &elem(&1, 2)),
+        al: Enum.find_value(entries, &elem(&1, 3))
+      }
+
+      quote do
+        def unquote(name)(), do: unquote(Macro.escape(rel))
+      end
+    end)
+  end
+
+  @spec clause([Macro.t()], [Macro.t()], Macro.Env.t()) :: {[term()], [term()]}
+  defp clause(head, body, env) do
+    {head, body} = anonymous(aliased({head, body}, env))
+    {Enum.map(head, &term/1), goals(body)}
+  end
 
   @spec anonymous(Macro.t()) :: Macro.t()
   defp anonymous(ast) do
@@ -79,47 +114,6 @@ defmodule Zkfol.Lang do
 
       node ->
         node
-    end)
-  end
-
-  @spec store(Macro.t(), [Macro.t()], Macro.Env.t()) :: Macro.t()
-  defp store(head, body, env) do
-    {name, _meta, args} = head
-    {args, body} = anonymous(aliased({List.wrap(args), body}, env))
-    clause = {Enum.map(args, &term/1), goals(body)}
-
-    quote do
-      @lang_clauses {unquote(name), unquote(length(args)),
-                     unquote(Macro.escape(clause, unquote: true)),
-                     Module.delete_attribute(__MODULE__, :phi),
-                     Module.delete_attribute(__MODULE__, :al)}
-    end
-  end
-
-  defmacro __before_compile__(env) do
-    grouped =
-      env.module
-      |> Module.get_attribute(:lang_clauses)
-      |> Enum.reverse()
-      |> Enum.group_by(fn {name, arity, _clause, _phi, _al} -> {name, arity} end)
-
-    Enum.map(grouped, fn {{name, arity}, entries} ->
-      clauses = for {_name, _arity, clause, _phi, _al} <- entries, do: clause
-      phi = Enum.find_value(entries, fn {_n, _a, _c, phi, _al} -> phi end)
-      al = Enum.find_value(entries, fn {_n, _a, _c, _phi, al} -> al end)
-
-      quote do
-        def unquote(name)() do
-          %Zkfol.Lang.Rel{
-            name: unquote(name),
-            arity: unquote(arity),
-            clauses: unquote(Macro.escape(clauses)),
-            home: __MODULE__,
-            phi: unquote(Macro.escape(phi)),
-            al: unquote(Macro.escape(al))
-          }
-        end
-      end
     end)
   end
 
