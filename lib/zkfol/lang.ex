@@ -103,43 +103,24 @@ defmodule Zkfol.Lang do
       |> Enum.reverse()
       |> Enum.group_by(fn {name, arity, _clause, _phi, _al} -> {name, arity} end)
 
-    rels =
-      Enum.map(grouped, fn {{name, arity}, entries} ->
-        clauses = for {_name, _arity, clause, _phi, _al} <- entries, do: clause
-        phi = Enum.find_value(entries, fn {_n, _a, _c, phi, _al} -> phi end)
-        al = Enum.find_value(entries, fn {_n, _a, _c, _phi, al} -> al end)
+    Enum.map(grouped, fn {{name, arity}, entries} ->
+      clauses = for {_name, _arity, clause, _phi, _al} <- entries, do: clause
+      phi = Enum.find_value(entries, fn {_n, _a, _c, phi, _al} -> phi end)
+      al = Enum.find_value(entries, fn {_n, _a, _c, _phi, al} -> al end)
 
-        quote do
-          def unquote(name)() do
-            %Zkfol.Lang.Rel{
-              name: unquote(name),
-              arity: unquote(arity),
-              clauses: unquote(Macro.escape(clauses)),
-              home: __MODULE__,
-              phi: unquote(Macro.escape(phi)),
-              al: unquote(Macro.escape(al))
-            }
-          end
-        end
-      end)
-
-    names = grouped |> Map.keys() |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
-
-    program =
       quote do
-        @doc "I am the module as a program: `root` first, every other defrel behind it."
-        @spec program(atom()) :: [Zkfol.Lang.Rel.t()]
-        def program(root) do
-          all = for name <- unquote(names), do: apply(__MODULE__, name, [])
-
-          case Enum.split_with(all, &(&1.name == root)) do
-            {[rooted], rest} -> [rooted | rest]
-            {[], _rest} -> raise ArgumentError, "no defrel #{root} in #{inspect(__MODULE__)}"
-          end
+        def unquote(name)() do
+          %Zkfol.Lang.Rel{
+            name: unquote(name),
+            arity: unquote(arity),
+            clauses: unquote(Macro.escape(clauses)),
+            home: __MODULE__,
+            phi: unquote(Macro.escape(phi)),
+            al: unquote(Macro.escape(al))
+          }
         end
       end
-
-    rels ++ [program]
+    end)
   end
 
   @spec lines(Macro.t()) :: [Macro.t()]
