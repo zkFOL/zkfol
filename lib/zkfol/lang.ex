@@ -205,15 +205,28 @@ defmodule Zkfol.Lang do
   defp hole(tag, k), do: {:var, :"_#{tag}#{k}"}
 
   @doc """
-  I am the relations `root` reaches, in call order, each pulled from the list, its module,
-  its home, `Zkfol.FOL` or `Zkfol.Prims`, and scoped once.
+  I am the relations `root` reaches, each pulled from the list, its module, its home,
+  `Zkfol.FOL` or `Zkfol.Prims`, and scoped once.
+
+  A name a clause's head does not bind is a relation when one answers to it, and a variable
+  otherwise. A call to a name that is neither is refused.
   """
   @spec reached(Rel.t(), [Rel.t()]) :: {:ok, [Rel.t()]} | {:error, Refusal.t()}
   def reached(root = %Rel{}, rels) do
-    with {:ok, reached} <-
-           gather([{root.name, root.home, true}], Map.new(rels, &{&1.name, &1}), []) do
-      scope = MapSet.new(reached, & &1.name)
-      {:ok, for(rel <- reached, do: scoped(rel, scope))}
+    reached = grow([root], Map.new(rels, &{&1.name, &1}), [])
+    scope = MapSet.new(reached, & &1.name)
+    scoped = for rel <- reached, do: scoped(rel, scope)
+
+    missing =
+      for %Rel{clauses: clauses} <- scoped,
+          {_head, body} <- clauses,
+          {:call, q, _args} <- nodes(body),
+          is_atom(q) and q not in scope,
+          do: q
+
+    case missing do
+      [] -> {:ok, scoped}
+      [name | _] -> {:error, {:relation_not_in_scope, %{relation: name}}}
     end
   end
 
@@ -231,7 +244,7 @@ defmodule Zkfol.Lang do
       for rel <- rels, do: :digraph.add_vertex(graph, rel.name)
 
       for rel <- rels,
-          callee <- Rel.calls(rel) ++ Rel.passes(rel),
+          {callee, _home} <- free(rel),
           :digraph.vertex(graph, callee) != false do
         :digraph.add_edge(graph, rel.name, callee)
       end
@@ -277,39 +290,50 @@ defmodule Zkfol.Lang do
   defp scoped({:reify, goal}, bound, scope), do: {:reify, scoped(goal, bound, scope)}
   defp scoped(leaf, _bound, _scope), do: leaf
 
-  @typep wanted :: {atom(), module() | nil, boolean()}
+  # Breadth first from the root, each relation adding those its free names answer to.
+  @spec grow([Rel.t()], %{atom() => Rel.t()}, [Rel.t()]) :: [Rel.t()]
+  defp grow([], _known, seen), do: Enum.reverse(seen)
 
-  @spec gather([wanted()], %{atom() => Rel.t()}, [Rel.t()]) ::
-          {:ok, [Rel.t()]} | {:error, Refusal.t()}
-  defp gather([], _known, seen), do: {:ok, Enum.reverse(seen)}
+  defp grow([rel | queue], known, seen) do
+    if Enum.any?(seen, &(&1.name == rel.name)) do
+      grow(queue, known, seen)
+    else
+      found =
+        for {name, home} <- free(rel),
+            found = known[name] || pulled(name, [home, Zkfol.FOL, Zkfol.Prims]),
+            do: found
 
-  defp gather([{name, home, needed?} | rest], known, seen) do
-    cond do
-      Enum.any?(seen, &(&1.name == name)) ->
-        gather(rest, known, seen)
-
-      rel = known[name] || pulled(name, [home, Zkfol.FOL, Zkfol.Prims]) ->
-        gather(rest ++ wants(rel), Map.put(known, name, rel), [rel | seen])
-
-      needed? ->
-        {:error, {:relation_not_in_scope, %{relation: name}}}
-
-      true ->
-        gather(rest, known, seen)
+      grow(queue ++ found, known, [rel | seen])
     end
   end
 
-  # A passed name is wanted where it resolves and no relation where it does not.
-  @spec wants(Rel.t()) :: [wanted()]
-  defp wants(rel = %Rel{home: home}) do
-    for {names, needed?} <- [{Rel.calls(rel), true}, {Rel.passes(rel), false}],
-        name <- names do
+  # The names each clause's body uses and its head does not bind, each with the module a
+  # qualified name points to.
+  @spec free(Rel.t()) :: [{atom(), module() | nil}]
+  defp free(%Rel{home: home, clauses: clauses}) do
+    for {head, body} <- clauses,
+        bound = MapSet.new(Term.names(head)),
+        node <- nodes(body),
+        name <- name(node),
+        not MapSet.member?(bound, name),
+        uniq: true do
       case name do
-        {mod, name} -> {name, mod, needed?}
-        name -> {name, home, needed?}
+        {mod, name} -> {name, mod}
+        name -> {name, home}
       end
     end
   end
+
+  # A callee, a partial call, or a variable; a callback is the head's variable.
+  @spec name(term()) :: [Term.name()]
+  defp name({:call, {:var, _callback}, _args}), do: []
+  defp name({tag, name, _args}) when tag in [:call, :papply], do: [name]
+  defp name({:var, name}), do: [name]
+  defp name(_node), do: []
+
+  # Every node of a term, each before its children.
+  @spec nodes(term()) :: [term()]
+  defp nodes(term), do: term |> Term.reduce([], &[&1 | &2]) |> Enum.reverse()
 
   # Only a relation the module defines answers, never another function of its name.
   @spec pulled(atom(), [module() | nil]) :: Rel.t() | nil
