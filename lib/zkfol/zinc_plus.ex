@@ -60,6 +60,15 @@ defmodule Zkfol.ZincPlus do
           | {:big, [[[non_neg_integer()]]]}
           | {:huge, [[[non_neg_integer()]]]}
 
+  typedstruct module: Binding, enforce: true do
+    @typedoc """
+    A named value the statement binds: the public cells, as `{column, row}`, that hold it.
+    The name is a label; the verifier reads the value from the cells.
+    """
+    field(:name, String.t())
+    field(:cells, [{non_neg_integer(), non_neg_integer()}])
+  end
+
   typedstruct module: Payload, enforce: true do
     @typedoc "One queued UAIR, as the NIF decodes it."
     field(:num_cols, pos_integer())
@@ -76,6 +85,22 @@ defmodule Zkfol.ZincPlus do
     field(:point_ties, [Zkfol.ZincPlus.Tie.t()], default: [])
     field(:reads, [{non_neg_integer(), [non_neg_integer()], non_neg_integer()}], default: [])
     field(:num_vars, pos_integer())
+    # A path prefix: a proof that verifies is written to `<prefix>.proof` beside the public
+    # inputs a verifier needs in `<prefix>.public.json`. Nothing private reaches either.
+    field(:export, Path.t() | nil, default: nil)
+    field(:bindings, [Zkfol.ZincPlus.Binding.t()], default: [])
+  end
+
+  @doc "I am the commitment a proof of `uair` would carry to its witness, without proving."
+  @spec commit(Uair.t()) :: {:ok, String.t()} | {:error, Refusal.t()}
+  def commit(uair = %Uair{}) do
+    with {:ok, payload} <- payload(uair, []),
+         {:ok, hex} <- Zkfol.ZincPlus.Native.commit_fol(payload) do
+      {:ok, hex}
+    else
+      {:error, said} when is_binary(said) -> {:error, Refusal.from_backend(said)}
+      {:error, refusal} -> {:error, refusal}
+    end
   end
 
   @doc "I queue an interpreted UAIR on the prover thread."
@@ -100,33 +125,44 @@ defmodule Zkfol.ZincPlus do
   @doc """
   I queue the UAIR with the prover fitting its magnitude and return an id.
 
+  `export: prefix` also writes the portable proof under `prefix` once it verifies; see
+  `Zkfol.Verifier`.
+
   `unchecked: true` ships the payload as built, past `fits/1`. It is the door the
   negative tests need: a forgery the circuit must refuse cannot be watched being
   refused while Elixir refuses it first. No ordinary caller passes it.
   """
   @spec request(Uair.t(), keyword()) :: {:ok, pos_integer()} | {:error, Refusal.t()}
   def request(uair = %Uair{}, opts \\ []) do
+    with {:ok, payload} <- payload(uair, opts),
+         {:error, said} <- prove_fol(payload) do
+      {:error, Refusal.from_backend(said)}
+    end
+  end
+
+  @spec payload(Uair.t(), keyword()) :: {:ok, Payload.t()} | {:error, Refusal.t()}
+  defp payload(uair, opts) do
     values = List.flatten(uair.columns)
     reads = reads(uair.mode)
 
     with :ok <- unclaimed(reads, uair.num_public),
          :ok <- if(Keyword.get(opts, :unchecked, false), do: :ok, else: fits(uair.columns)) do
-      queued =
-        prove_fol(%Payload{
-          num_cols: Uair.num_cols(uair),
-          num_public: uair.num_public,
-          shifts: uair.shifts,
-          program: Enum.map(uair.program, &wire/1),
-          cells: cells(uair, values),
-          word_lookups: uair.word_lookups,
-          selected_lookups: uair.selected_lookups,
-          permuted_lookups: uair.permuted_lookups,
-          point_ties: uair.point_ties,
-          reads: reads,
-          num_vars: Uair.num_vars(uair)
-        })
-
-      with {:error, said} <- queued, do: {:error, Refusal.from_backend(said)}
+      {:ok,
+       %Payload{
+         num_cols: Uair.num_cols(uair),
+         num_public: uair.num_public,
+         shifts: uair.shifts,
+         program: Enum.map(uair.program, &wire/1),
+         cells: cells(uair, values),
+         word_lookups: uair.word_lookups,
+         selected_lookups: uair.selected_lookups,
+         permuted_lookups: uair.permuted_lookups,
+         point_ties: uair.point_ties,
+         reads: reads,
+         num_vars: Uair.num_vars(uair),
+         export: Keyword.get(opts, :export),
+         bindings: Keyword.get(opts, :bindings, [])
+       }}
     end
   end
 

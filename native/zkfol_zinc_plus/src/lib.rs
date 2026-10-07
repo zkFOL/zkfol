@@ -2,8 +2,9 @@
 //! each call returns an id, and the verdict arrives as a message
 //! `{:zinc_plus, id, result}` addressed to the caller.
 
-mod config;
-mod runtime;
+pub mod config;
+pub mod runtime;
+pub mod wire;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,18 +12,17 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use crypto_primitives::PrimeField;
 use rustler::types::atom::{error, ok};
-use rustler::{Encoder, Env, LocalPid, NifStruct, NifTaggedEnum, OwnedEnv};
+use rustler::{Encoder, Env, LocalPid, NifStruct, OwnedEnv};
 use zinc_protocol::ZincPlusPiop;
-use zinc_transcript::traits::Transcribable;
-use zinc_uair::{ideal::DegreeOneIdeal, ideal_collector::IdealOrZero, Uair};
+use zinc_uair::Uair;
 
 use config::{
     setup_big_pp, setup_huge_pp, setup_pp, BigCfg, BigInt, Cfg, HugeCfg, HugeInt, D, F,
     NUM_COLUMN_OPENINGS, PERFORM_CHECKS, REP_FACTOR,
 };
 use runtime::{Op, Permuted, RuntimeUair, Selected, Spec, Tie, SPEC};
+use wire::{encode_proof, verify_proof, write_export, Binding, Payload, Statement};
 
 const BACKEND: &str = "zinc-plus-66776a3";
 
@@ -48,20 +48,14 @@ mod atoms {
     rustler::atoms! { up, down, add, mul, constant = "const", zinc_plus }
 }
 
-/// The trace payload as Elixir tags it, one variant per cell width.
-#[derive(NifTaggedEnum)]
-enum Payload {
-    I64(Vec<Vec<i64>>),
-    Big(Vec<Vec<Vec<u64>>>),
-    Huge(Vec<Vec<Vec<u64>>>),
-}
-
 struct Job {
     pid: LocalPid,
     id: u64,
     spec: Spec,
     payload: Payload,
     num_vars: usize,
+    export: Option<String>,
+    bindings: Vec<Binding>,
 }
 
 static JOBS: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
@@ -103,6 +97,8 @@ struct Request {
     point_ties: Vec<Tie>,
     reads: Vec<(usize, Vec<usize>, usize)>,
     num_vars: usize,
+    export: Option<String>,
+    bindings: Vec<Binding>,
 }
 
 /// Queue the statement and return the id its verdict will answer to.
@@ -126,6 +122,8 @@ fn prove_fol(env: Env, request: Request) -> Result<u64, String> {
         },
         payload: request.cells,
         num_vars: request.num_vars,
+        export: request.export,
+        bindings: request.bindings,
     };
 
     JOBS.get_or_init(|| {
@@ -174,10 +172,18 @@ fn panic_said(payload: &(dyn std::any::Any + Send)) -> String {
 fn verdict(job: Job) {
     let (pid, id) = (job.pid, job.id);
     let num_public = job.spec.num_public;
+    // The statement carries only the public columns: what a verifier is told.
+    let export = job.export.map(|prefix| {
+        let public = job.payload.public(num_public);
+        (
+            prefix,
+            Statement { num_vars: job.num_vars, spec: job.spec.clone(), public, bindings: job.bindings },
+        )
+    });
     *SPEC.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(job.spec);
 
     let verdict = catch_unwind(AssertUnwindSafe(|| {
-        run(job.payload, job.num_vars, num_public)
+        run(job.payload, job.num_vars, num_public, export)
     }))
     .unwrap_or_else(|payload| Err(panic_said(payload.as_ref())));
 
@@ -199,7 +205,7 @@ fn send_verdict(pid: LocalPid, id: u64, verdict: &Result<Report, String>) {
 /// The one prove-and-verify driver, expanded per configuration: a macro
 /// rather than a generic, so the trait bounds live only in zinc-plus.
 macro_rules! prove_verify {
-    ($cfg:ty, $cell:ty, $pp:expr, $trace:expr, $num_vars:expr, $public:expr, $backend:expr) => {{
+    ($cfg:ty, $cell:ty, $pp:expr, $trace:expr, $num_vars:expr, $public:expr, $backend:expr, $export:expr) => {{
         let started = Instant::now();
         let proof = ZincPlusPiop::<$cfg, RuntimeUair<$cell>, F, D>::prove::<false, PERFORM_CHECKS>(
             &$pp,
@@ -209,27 +215,20 @@ macro_rules! prove_verify {
         )
         .map_err(|e| format!("prover failed: {e:?}"))?;
         let prove_ms = started.elapsed().as_secs_f64() * 1000.0;
-        let proof_bytes = proof.get_num_bytes();
+        let encoded = encode_proof(&proof);
+        let proof_bytes = encoded.len();
 
         let sig = RuntimeUair::<$cell>::signature();
         let public_trace = $trace.public(&sig);
 
-        let proj_ideal = |ideal: &IdealOrZero<<RuntimeUair<$cell> as Uair>::Ideal>,
-                          field_cfg: &<F as PrimeField>::Config| {
-            ideal.map(|i| DegreeOneIdeal::from_with_cfg(i, field_cfg))
-        };
-
         let started = Instant::now();
-        ZincPlusPiop::<$cfg, RuntimeUair<$cell>, F, D>::verify::<_, PERFORM_CHECKS>(
-            &$pp,
-            proof,
-            &public_trace,
-            $num_vars,
-            zinc_protocol::project_scalar_fn,
-            proj_ideal,
-        )
-        .map_err(|e| format!("verifier failed: {e:?}"))?;
+        verify_proof!($cfg, $cell, $pp, proof, public_trace, $num_vars)?;
         let verify_ms = started.elapsed().as_secs_f64() * 1000.0;
+
+        // Only a proof that verified is ever written, so a false statement leaves no file.
+        if let Some((prefix, statement)) = &$export {
+            write_export(prefix, statement, &encoded)?;
+        }
 
         Ok(Report {
             prove_ms,
@@ -242,12 +241,17 @@ macro_rules! prove_verify {
     }};
 }
 
-fn run(payload: Payload, num_vars: usize, public: usize) -> Result<Report, String> {
+fn run(
+    payload: Payload,
+    num_vars: usize,
+    public: usize,
+    export: Option<(String, Statement)>,
+) -> Result<Report, String> {
     match payload {
         Payload::I64(columns) => {
             let trace = runtime::trace(columns, num_vars);
             let pp = setup_pp(num_vars)?;
-            prove_verify!(Cfg, i64, pp, trace, num_vars, public, BACKEND.to_string())
+            prove_verify!(Cfg, i64, pp, trace, num_vars, public, BACKEND.to_string(), export)
         }
         Payload::Big(columns) => {
             let trace = runtime::limb_trace::<12>(columns, num_vars);
@@ -259,7 +263,8 @@ fn run(payload: Payload, num_vars: usize, public: usize) -> Result<Report, Strin
                 trace,
                 num_vars,
                 public,
-                format!("{BACKEND}/int768")
+                format!("{BACKEND}/int768"),
+                export
             )
         }
         Payload::Huge(columns) => {
@@ -272,9 +277,22 @@ fn run(payload: Payload, num_vars: usize, public: usize) -> Result<Report, Strin
                 trace,
                 num_vars,
                 public,
-                format!("{BACKEND}/int7040")
+                format!("{BACKEND}/int7040"),
+                export
             )
         }
+    }
+}
+
+/// The commitment a proof of this statement would carry to its witness, without proving:
+/// the integer tier only, and the witness columns are those after the public ones.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn commit_fol(request: Request) -> Result<String, String> {
+    match request.cells {
+        Payload::I64(columns) => {
+            wire::commit_witness(columns[request.num_public..].to_vec(), request.num_vars)
+        }
+        _ => Err("commit supports the i64 tier only".to_string()),
     }
 }
 

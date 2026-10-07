@@ -21,7 +21,8 @@ for module <-
         Examples.ESudoku,
         Examples.EPassed,
         Examples.EFol,
-        Examples.EForgery
+        Examples.EForgery,
+        Examples.EVerifier
       ] ++ bench do
   Module.create(
     Module.concat(module, Test),

@@ -6,11 +6,17 @@ publish = false
 
 [lib]
 name = "zkfol_zinc_plus"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "zkfol_verify"
+path = "src/bin/zkfol_verify.rs"
 
 [dependencies]
 rustler = "0.38"
 rand = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 crypto-bigint = { version = "= 0.7.0-rc.9", features = ["zeroize"] }
 crypto-primitives = { git = "https://github.com/NethermindEth/crypto-primitives.git", rev = "9ce6d879a43ae6806612225c95d8b03ce5173b55", features = ["std", "crypto_bigint", "rand"] }
 zinc-protocol = { git = "https://github.com/mariari/zinc-plus.git", rev = "5a01924" }
