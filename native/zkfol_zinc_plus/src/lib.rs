@@ -225,7 +225,7 @@ macro_rules! prove_verify {
         };
 
         let started = Instant::now();
-        ZincPlusPiop::<$cfg, RuntimeUair<$cell>, F, D>::verify::<_, PERFORM_CHECKS>(
+        ZincPlusPiop::<$cfg, RuntimeUair<$cell>, F, D>::verify::<_, { config::CHECK_OVERFLOW }>(
             &$pp,
             proof,
             &public_trace,
