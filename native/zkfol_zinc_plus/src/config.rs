@@ -39,6 +39,9 @@ pub const REP_FACTOR: usize = 8;
 pub const NUM_COLUMN_OPENINGS: usize = <BinaryCfg as ZipTypes>::NUM_COLUMN_OPENINGS;
 /// Prover-side self-checks, off in earnest runs as in the upstream bench.
 pub const PERFORM_CHECKS: bool = zinc_utils::UNCHECKED;
+/// Overflow-checked arithmetic in the codes and the verifier: a combination
+/// that wrapped would hold only modulo 2^k, where the code is far sparser.
+pub const CHECK_OVERFLOW: bool = zinc_utils::CHECKED;
 
 pub type F = MontyField<FIELD_LIMBS>;
 type Fmod = Uint<FIELD_LIMBS>;
@@ -129,20 +132,20 @@ macro_rules! tier {
             type ArbitraryZt = $arbitrary;
             type IntZt = $int_cfg;
 
-            type BinaryLc = IprsCode<$binary, PnttConfig7340033, REP_FACTOR, PERFORM_CHECKS>;
-            type ArbitraryLc = IprsCode<$arbitrary, PnttConfig7340033, REP_FACTOR, PERFORM_CHECKS>;
-            type IntLc = IprsCode<$int_cfg, PnttConfig7340033, REP_FACTOR, PERFORM_CHECKS>;
+            type BinaryLc = IprsCode<$binary, PnttConfig7340033, REP_FACTOR, CHECK_OVERFLOW>;
+            type ArbitraryLc = IprsCode<$arbitrary, PnttConfig7340033, REP_FACTOR, CHECK_OVERFLOW>;
+            type IntLc = IprsCode<$int_cfg, PnttConfig7340033, REP_FACTOR, CHECK_OVERFLOW>;
         }
 
         pub type $pp = (
-            ZipPlusParams<$binary, IprsCode<$binary, PnttConfig7340033, REP_FACTOR, PERFORM_CHECKS>>,
+            ZipPlusParams<$binary, IprsCode<$binary, PnttConfig7340033, REP_FACTOR, CHECK_OVERFLOW>>,
             ZipPlusParams<
                 $arbitrary,
-                IprsCode<$arbitrary, PnttConfig7340033, REP_FACTOR, PERFORM_CHECKS>,
+                IprsCode<$arbitrary, PnttConfig7340033, REP_FACTOR, CHECK_OVERFLOW>,
             >,
             ZipPlusParams<
                 $int_cfg,
-                IprsCode<$int_cfg, PnttConfig7340033, REP_FACTOR, PERFORM_CHECKS>,
+                IprsCode<$int_cfg, PnttConfig7340033, REP_FACTOR, CHECK_OVERFLOW>,
             >,
         );
 
