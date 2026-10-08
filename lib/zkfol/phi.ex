@@ -173,7 +173,7 @@ defmodule Zkfol.Phi do
           for(bank = %Bank{} <- walk.members, do: runs(bank))
       )
 
-    {pred, members} = Zkfol.Nodes.lower(Value.shaped(pred, walk.shapes), walk.members)
+    {pred, members} = Zkfol.Nodes.lower(pred, walk.members)
     {:ok, pred, Alloc.numbered(members, name), walk}
   catch
     {:refused, refusal} -> {:error, refusal}
@@ -676,7 +676,6 @@ defmodule Zkfol.Phi do
         walk
         | members: walk.members ++ made.members,
           predicates: walk.predicates ++ made.predicates,
-          eqs: Enum.reverse(made.eqs, walk.eqs),
           sites: walk.sites ++ [{k, site}],
           slots: walk.slots ++ pointers,
           clauses: walk.clauses ++ made.clauses
@@ -712,7 +711,6 @@ defmodule Zkfol.Phi do
     end
   end
 
-  # A bank made from a literal holds exactly those cells: its presence is bounded here.
   @spec place_new_member(Rel.t(), [value()], Place.known(), ctx()) :: placement()
   defp place_new_member(callee, values, known, ctx) do
     lifted = for form <- values, do: Value.handed(form)
@@ -727,15 +725,7 @@ defmodule Zkfol.Phi do
 
     handed = Enum.map(lifted, &Value.unframe(&1, frame))
     {name, binds, walk} = compile_member(callee, handed, known, column, ctx)
-
-    bounded =
-      for {cells, bind} <- Enum.zip(lifted, binds),
-          Layout.data?(cells),
-          laid when Place.is_laid(laid) <- [Value.frame(bind, frame)],
-          eq <- Place.bounded(laid, length(cells)),
-          do: eq
-
-    {name, binds, frame, %{walk | eqs: bounded}}
+    {name, binds, frame, walk}
   end
 
   # A call continues the member being compiled unless it hands a literal list, a pair

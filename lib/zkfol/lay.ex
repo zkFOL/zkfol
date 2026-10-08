@@ -459,9 +459,7 @@ defmodule Zkfol.Lay do
   defp spread({%Slot{allocation: {:node, ref}}, value}, x, alloc),
     do: [{{Alloc.row(alloc, ref), x}, {:node, value}}]
 
-  # A held bank is laid ending at column one, so its head is at column length + 1. The
-  # pointer cell on the member's column holds that column.
-  defp spread({slot = %Slot{allocation: {:bank, bank, address}}, values}, x, alloc)
+  defp spread({slot = %Slot{allocation: {:bank, bank, _address}}, values}, x, alloc)
        when is_list(values) do
     rows = Alloc.slot_rows(alloc, slot)
 
@@ -469,26 +467,16 @@ defmodule Zkfol.Lay do
       for ref = {Zkfol.Nodes, {:suffix, {^bank, _element}}} <- Alloc.refs(alloc),
           do: Alloc.row(alloc, ref)
 
-    {pointer, base} =
-      case address do
-        {:at, {:cell, ref}, _m, _a} ->
-          {[{{Alloc.row(alloc, ref), x}, length(values) + 1}], length(values) + 1}
+    Enum.flat_map(Enum.with_index(values), fn {value, p} ->
+      column = Ast.column(at(slot, p), x)
 
-        {:at, :x, _m, _a} ->
-          {[], x}
-      end
+      cells =
+        for {cell, row} <- Enum.zip(row_values(value, length(rows)), rows),
+            do: {{Alloc.row(alloc, row), column}, cell}
 
-    pointer ++
-      Enum.flat_map(Enum.with_index(values), fn {value, p} ->
-        column = Ast.column(at(slot, p), base)
-
-        cells =
-          for {cell, row} <- Enum.zip(row_values(value, length(rows)), rows),
-              do: {{Alloc.row(alloc, row), column}, cell}
-
-        nodes = for row <- suffix_rows, do: {{row, column}, {:node, Enum.drop(values, p)}}
-        [{{Alloc.presence(alloc, bank), column}, 1} | cells ++ nodes]
-      end)
+      nodes = for row <- suffix_rows, do: {{row, column}, {:node, Enum.drop(values, p)}}
+      [{{Alloc.presence(alloc, bank), column}, 1} | cells ++ nodes]
+    end)
   end
 
   defp spread(_unallocated, _x, _alloc), do: []
