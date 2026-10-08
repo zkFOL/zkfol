@@ -188,7 +188,7 @@ defmodule Examples.EAl do
     for pointer <- pointers do
       slack = Enum.map(Enum.at(uair.columns, pointer), &(&1 - 1))
 
-      assert Enum.any?(uair.word_lookups, fn {row, 32, 8} ->
+      assert Enum.any?(uair.limbs, fn {row, _limbs} ->
                Enum.at(uair.columns, row) == slack
              end)
 

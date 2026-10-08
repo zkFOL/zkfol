@@ -29,8 +29,8 @@ use zip_plus::{
 /// Degree + 1 of the protocol's polynomials, including the trace.
 pub const D: usize = 32;
 const INT_LIMBS: usize = U64::LIMBS;
-/// Four limbs: main-beta projects through the fixed secp256k1 prime,
-/// so the modulus type must hold exactly 256 bits.
+/// Four limbs: the projecting prime is drawn from the transcript at the
+/// modulus type's width, 256 bits.
 pub const FIELD_LIMBS: usize = U64::LIMBS * 4;
 /// Repetition factor for the linear code, an inverse rate.
 pub const REP_FACTOR: usize = 8;

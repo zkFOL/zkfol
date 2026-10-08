@@ -873,7 +873,7 @@ dependencies = [
 [[package]]
 name = "zinc-piop"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "ahash",
  "crypto-primitives",
@@ -892,7 +892,7 @@ dependencies = [
 [[package]]
 name = "zinc-poly"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "crypto-bigint",
  "crypto-primitives",
@@ -910,7 +910,7 @@ dependencies = [
 [[package]]
 name = "zinc-primality"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "crypto-bigint",
  "crypto-primes",
@@ -920,7 +920,7 @@ dependencies = [
 [[package]]
 name = "zinc-protocol"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "crypto-primitives",
  "itertools 0.14.0",
@@ -939,7 +939,7 @@ dependencies = [
 [[package]]
 name = "zinc-transcript"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "blake3",
  "crypto-bigint",
@@ -953,7 +953,7 @@ dependencies = [
 [[package]]
 name = "zinc-uair"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "crypto-primitives",
  "num-traits",
@@ -967,7 +967,7 @@ dependencies = [
 [[package]]
 name = "zinc-utils"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "crypto-bigint",
  "crypto-primitives",
@@ -979,7 +979,7 @@ dependencies = [
 [[package]]
 name = "zip-plus"
 version = "0.1.0"
-source = "git+https://github.com/mariari/zinc-plus.git?rev=5a01924#5a01924a06b8748e3250bda37aafd7a34135b223"
+source = "git+https://github.com/mariari/zinc-plus.git?rev=426e56d#426e56dcd17fecf487f0daf95e9685c6fb42ff95"
 dependencies = [
  "ark-ff",
  "ark-poly",
