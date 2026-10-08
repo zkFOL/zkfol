@@ -229,7 +229,7 @@ defmodule Examples.EUser do
     statement
   end
 
-  @doc "A guard's slack past 32 bits is a natural all the same; only the Word lookup refuses it."
+  @doc "A guard's slack past 32 bits is a natural all the same; only its limbs refuse it."
   @spec a_slack_cannot_outgrow_its_word() :: Refusal.t()
   example a_slack_cannot_outgrow_its_word do
     wide =
@@ -251,13 +251,13 @@ defmodule Examples.EUser do
     assert Enum.min(cells) >= 0
     assert Enum.max(cells) < 2 ** 32
 
-    assert {:error, {:prover_failed, %{said: said}} = refused} =
+    assert {:error, {:verifier_rejected, %{said: said}} = refused} =
              Prover.prove(Statement.pred(statement), witness,
                claims: Statement.claims(statement),
                name: :wide_slack
              )
 
-    assert said =~ "Lookup"
+    assert said =~ "AssertZero"
     refused
   end
 

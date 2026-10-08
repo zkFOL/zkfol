@@ -18,8 +18,8 @@ defmodule Zkfol.ZincPlus do
   @big_bound Integer.pow(2, 766)
   @huge_bound Integer.pow(2, 7038)
 
-  @typedoc "A word lookup: {column, table width, chunk width}."
-  @type lookup :: {non_neg_integer(), pos_integer(), pos_integer()}
+  @typedoc "A word lookup: {column, table width}."
+  @type lookup :: {non_neg_integer(), pos_integer()}
 
   typedstruct module: Selected, enforce: true do
     @typedoc """
@@ -118,7 +118,7 @@ defmodule Zkfol.ZincPlus do
           shifts: uair.shifts,
           program: Enum.map(uair.program, &wire/1),
           cells: cells(uair, values),
-          word_lookups: uair.word_lookups,
+          word_lookups: Uair.word_lookups(uair),
           selected_lookups: uair.selected_lookups,
           permuted_lookups: uair.permuted_lookups,
           point_ties: uair.point_ties,

@@ -70,10 +70,10 @@ pub struct Spec {
     pub num_public: usize,
     pub shifts: Vec<(usize, usize)>,
     pub program: Vec<Op>,
-    /// Word lookups: (int column, table width, chunk width). A cell of an
-    /// int column is the number the table is indexed by, so this is the
-    /// range check: the column proves only if every cell is under 2^width.
-    pub word_lookups: Vec<(usize, usize, usize)>,
+    /// Word lookups: (int column, table width). A cell of an int column is
+    /// the number the table is indexed by, so this is the range check: the
+    /// column proves only if every cell is under 2^width.
+    pub word_lookups: Vec<(usize, usize)>,
     /// The Selected groups, one a table: each names its own cells, so it
     /// says nothing about the rows no selection reaches.
     pub selected: Vec<Selected>,
@@ -141,12 +141,9 @@ where
         let lookups = spec
             .word_lookups
             .iter()
-            .map(|&(col, width, chunk)| LookupColumnSpec {
+            .map(|&(col, width)| LookupColumnSpec {
                 column_index: col,
-                table_type: LookupTableType::Word {
-                    width,
-                    chunk_width: Some(chunk),
-                },
+                table_type: LookupTableType::Word { width, chunk_width: None },
             })
             .chain(spec.selected.iter().flat_map(|group| {
                 group.columns.iter().map(|&col| LookupColumnSpec {

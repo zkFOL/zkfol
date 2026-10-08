@@ -55,9 +55,9 @@ defmodule Zkfol.Uair do
   @typedoc "A column the program reads back, and by how many rows."
   @type shift :: {non_neg_integer(), pos_integer()}
 
-  # The backend needs width / chunk to be a power of two.
-  @word_width 32
-  @word_chunk 8
+  # A bounded row is spelled in limbs the backend's Word table ranges over.
+  @limb_width 8
+  @limbs 4
 
   typedstruct enforce: true do
     field(:num_public, non_neg_integer())
@@ -70,11 +70,17 @@ defmodule Zkfol.Uair do
     field(:columns, [[integer()]])
     field(:mode, mode(), default: %Plain{})
     field(:rows, [row()], default: [])
-    field(:word_lookups, [ZincPlus.lookup()], default: [])
+    # A bounded column and the columns of its limbs.
+    field(:limbs, [{non_neg_integer(), [non_neg_integer()]}], default: [])
     field(:selected_lookups, [ZincPlus.Selected.t()], default: [])
     field(:permuted_lookups, [ZincPlus.Permuted.t()], default: [])
     field(:point_ties, [ZincPlus.Tie.t()], default: [])
   end
+
+  @doc "I am the Word lookups the limbs owe: one per limb column, over the limb width."
+  @spec word_lookups(t()) :: [ZincPlus.lookup()]
+  def word_lookups(%__MODULE__{limbs: limbs}),
+    do: for({_column, columns} <- limbs, column <- columns, do: {column, @limb_width})
 
   @doc "I am the committed column count: the columns themselves say it."
   @spec num_cols(t()) :: non_neg_integer()
@@ -138,6 +144,8 @@ defmodule Zkfol.Uair do
          pointed = Enum.flat_map(Ast.pointer_derefs(pred), &Tuple.to_list/1),
          {pred, witness, public} = twinned(pred, witness, public, pointed ++ named),
          {:ok, pred, witness, lowering} <- Composed.lower(pred, witness, num_vars(len)),
+         bounded = naturals(obligations) ++ Composed.bounded_rows(lowering),
+         {pred, witness, limbs} = limbed(pred, witness, bounded),
          poly = polynomial(pred, len),
          unread = named ++ Composed.value_rows(lowering) ++ Enum.map(ties, &elem(&1, 0)),
          rows = layout(poly, public, unread),
@@ -158,10 +166,7 @@ defmodule Zkfol.Uair do
          columns: columns,
          mode: Composed.emitted(lowering, cols),
          rows: rows,
-         word_lookups:
-           for i <- naturals(obligations) ++ Composed.bounded_rows(lowering) do
-             {cols[i], @word_width, @word_chunk}
-           end,
+         limbs: for({row, rows} <- limbs, do: {cols[row], Enum.map(rows, &cols[&1])}),
          selected_lookups: selected(tables, cols, len),
          permuted_lookups: permuted(pairs, cols, len),
          point_ties:
@@ -245,6 +250,41 @@ defmodule Zkfol.Uair do
 
     {pred, witness}
   end
+
+  # The Word table ranges over a limb, so a bounded row is spelled in limbs. The program
+  # skips the cube's last row, so the spelling is stated a row back too, which holds it
+  # there as well.
+  @spec limbed(Ast.pred(), Interpretation.t(), [pos_integer()]) ::
+          {Ast.pred(), Interpretation.t(), [{pos_integer(), [pos_integer()]}]}
+  defp limbed(pred, witness, bounded) do
+    bounded = Enum.uniq(bounded)
+    leaves = for row <- bounded, k <- 0..(@limbs - 1), do: {row, k}
+    {witness, rows} = rowed(witness, leaves, &limb(&1, witness, &2))
+    limbs = for row <- bounded, do: {row, Enum.map(0..(@limbs - 1), &rows[{row, &1}])}
+
+    spellings =
+      for {row, limb_rows} <- limbs, back <- [0, -1] do
+        weighted =
+          limb_rows
+          |> Enum.with_index()
+          |> Enum.map(fn {l, k} -> Ast.mul(Ast.at(l, :x, 1, back), 1 <<< (@limb_width * k)) end)
+
+        Ast.eq(Ast.at(row, :x, 1, back), Enum.reduce(weighted, &Ast.add(&2, &1)))
+      end
+
+    pred =
+      pred
+      |> Ast.branches()
+      |> Enum.map(&Ast.conj(Ast.conjuncts(&1) ++ spellings))
+      |> Ast.disj()
+
+    {pred, witness, limbs}
+  end
+
+  @spec limb({pos_integer(), non_neg_integer()}, Interpretation.t(), pos_integer()) ::
+          integer()
+  defp limb({row, k}, witness, x),
+    do: Interpretation.at(witness, row, x) >>> (@limb_width * k) &&& (1 <<< @limb_width) - 1
 
   @spec natural_value(Ast.term_t(), Interpretation.t(), pos_integer()) :: non_neg_integer()
   defp natural_value(term, witness, x) do
