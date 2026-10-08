@@ -50,12 +50,6 @@ defmodule Zkfol.Lang.Term do
     |> Enum.reverse()
   end
 
-  @doc "I am the relation a term passes and the arguments it fixes, nil where it passes none."
-  @spec passed(t(), MapSet.t()) :: {name(), [t()]} | nil
-  def passed({:papply, name, prefix}, _bound), do: {name, prefix}
-  def passed({:var, name}, bound), do: if(not MapSet.member?(bound, name), do: {name, []})
-  def passed(_term, _bound), do: nil
-
   @doc "I am the elements a closed bracket lists; a bracket open past a name lists none for sure."
   @spec closed(term()) :: [term()] | nil
   def closed(nil), do: []

@@ -31,34 +31,80 @@ defmodule Zkfol.Lang do
 
   @doc "I build a relation where a function runs, `^` splicing the scope's values in."
   defmacro rel(name, do: block) do
-    clauses = for form <- lines(block), do: rel_clause(name, aliased(form, __CALLER__))
-    arity = clauses |> hd() |> elem(0) |> length()
+    clauses = for form <- lines(block), do: rel_clause(name, form, __CALLER__)
 
     quote do
       %Zkfol.Lang.Rel{
         name: unquote(name),
-        arity: unquote(arity),
+        arity: unquote(clauses |> hd() |> elem(0) |> length()),
         clauses: unquote(Macro.escape(clauses, unquote: true)),
         home: __MODULE__
       }
     end
   end
 
-  @spec rel_clause(atom(), Macro.t()) :: {[term()], [term()]}
-  defp rel_clause(name, {name, _meta, args}) do
-    args = anonymous(List.wrap(args))
-
-    case List.last(args) do
-      [do: block] ->
-        {args |> Enum.drop(-1) |> Enum.map(&term/1), block |> lines() |> goals()}
-
-      _bare ->
-        {Enum.map(args, &term/1), []}
+  @spec rel_clause(atom(), Macro.t(), Macro.Env.t()) :: {[term()], [term()]}
+  defp rel_clause(name, {name, _meta, args}, env) do
+    case Enum.split(List.wrap(args), -1) do
+      {head, [[do: block]]} -> clause(head, lines(block), env)
+      _fact -> clause(List.wrap(args), [], env)
     end
   end
 
-  defp rel_clause(name, {other, _meta, _args}),
+  defp rel_clause(name, {other, _meta, _args}, _env),
     do: raise(ArgumentError, "the clause #{other} does not belong to the relation #{name}")
+
+  # The `@phi` and `@al` written above a clause belong to its relation.
+  @spec store(Macro.t(), [Macro.t()], Macro.Env.t()) :: Macro.t()
+  defp store({name, _meta, args}, body, env) do
+    clause = clause(List.wrap(args), body, env)
+
+    quote do
+      @lang_clauses {unquote(name), unquote(Macro.escape(clause, unquote: true)),
+                     Module.delete_attribute(__MODULE__, :phi),
+                     Module.delete_attribute(__MODULE__, :al)}
+    end
+  end
+
+  defmacro __before_compile__(env) do
+    grouped =
+      env.module
+      |> Module.get_attribute(:lang_clauses)
+      |> Enum.reverse()
+      |> Enum.group_by(&elem(&1, 0))
+
+    relations =
+      quote do
+        @doc false
+        def __relations__, do: unquote(Map.keys(grouped))
+      end
+
+    rels =
+      Enum.map(grouped, fn {name, entries} ->
+        clauses = for {_name, clause, _phi, _al} <- entries, do: clause
+
+        rel = %Rel{
+          name: name,
+          arity: clauses |> hd() |> elem(0) |> length(),
+          clauses: clauses,
+          home: env.module,
+          phi: Enum.find_value(entries, &elem(&1, 2)),
+          al: Enum.find_value(entries, &elem(&1, 3))
+        }
+
+        quote do
+          def unquote(name)(), do: unquote(Macro.escape(rel))
+        end
+      end)
+
+    rels ++ [relations]
+  end
+
+  @spec clause([Macro.t()], [Macro.t()], Macro.Env.t()) :: {[term()], [term()]}
+  defp clause(head, body, env) do
+    {head, body} = anonymous(aliased({head, body}, env))
+    {Enum.map(head, &term/1), goals(body)}
+  end
 
   @spec anonymous(Macro.t()) :: Macro.t()
   defp anonymous(ast) do
@@ -80,66 +126,6 @@ defmodule Zkfol.Lang do
       node ->
         node
     end)
-  end
-
-  @spec store(Macro.t(), [Macro.t()], Macro.Env.t()) :: Macro.t()
-  defp store(head, body, env) do
-    {name, _meta, args} = head
-    {args, body} = anonymous(aliased({List.wrap(args), body}, env))
-    clause = {Enum.map(args, &term/1), goals(body)}
-
-    quote do
-      @lang_clauses {unquote(name), unquote(length(args)),
-                     unquote(Macro.escape(clause, unquote: true)),
-                     Module.delete_attribute(__MODULE__, :phi),
-                     Module.delete_attribute(__MODULE__, :al)}
-    end
-  end
-
-  defmacro __before_compile__(env) do
-    grouped =
-      env.module
-      |> Module.get_attribute(:lang_clauses)
-      |> Enum.reverse()
-      |> Enum.group_by(fn {name, arity, _clause, _phi, _al} -> {name, arity} end)
-
-    rels =
-      Enum.map(grouped, fn {{name, arity}, entries} ->
-        clauses = for {_name, _arity, clause, _phi, _al} <- entries, do: clause
-        phi = Enum.find_value(entries, fn {_n, _a, _c, phi, _al} -> phi end)
-        al = Enum.find_value(entries, fn {_n, _a, _c, _phi, al} -> al end)
-
-        quote do
-          def unquote(name)() do
-            %Zkfol.Lang.Rel{
-              name: unquote(name),
-              arity: unquote(arity),
-              clauses: unquote(Macro.escape(clauses)),
-              home: __MODULE__,
-              phi: unquote(Macro.escape(phi)),
-              al: unquote(Macro.escape(al))
-            }
-          end
-        end
-      end)
-
-    names = grouped |> Map.keys() |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
-
-    program =
-      quote do
-        @doc "I am the module as a program: `root` first, every other defrel behind it."
-        @spec program(atom()) :: [Zkfol.Lang.Rel.t()]
-        def program(root) do
-          all = for name <- unquote(names), do: apply(__MODULE__, name, [])
-
-          case Enum.split_with(all, &(&1.name == root)) do
-            {[rooted], rest} -> [rooted | rest]
-            {[], _rest} -> raise ArgumentError, "no defrel #{root} in #{inspect(__MODULE__)}"
-          end
-        end
-      end
-
-    rels ++ [program]
   end
 
   @spec lines(Macro.t()) :: [Macro.t()]
@@ -220,15 +206,28 @@ defmodule Zkfol.Lang do
   defp hole(tag, k), do: {:var, :"_#{tag}#{k}"}
 
   @doc """
-  I am the relations `root` reaches, in call order, each pulled from the list, its module,
-  its home, `Zkfol.FOL` or `Zkfol.Prims`, and scoped once.
+  I am the relations `root` reaches, each pulled from the list, its module, its home,
+  `Zkfol.FOL` or `Zkfol.Prims`, and scoped once.
+
+  A name a clause's head does not bind is a relation when one answers to it, and a variable
+  otherwise. A call to a name that is neither is refused.
   """
   @spec reached(Rel.t(), [Rel.t()]) :: {:ok, [Rel.t()]} | {:error, Refusal.t()}
   def reached(root = %Rel{}, rels) do
-    with {:ok, reached} <-
-           gather([{root.name, root.home, true}], Map.new(rels, &{&1.name, &1}), []) do
-      scope = MapSet.new(reached, & &1.name)
-      {:ok, for(rel <- reached, do: scoped(rel, scope))}
+    reached = grow([root], Map.new(rels, &{&1.name, &1}), [])
+    scope = MapSet.new(reached, & &1.name)
+    scoped = for rel <- reached, do: scoped(rel, scope)
+
+    missing =
+      for %Rel{clauses: clauses} <- scoped,
+          {_head, body} <- clauses,
+          {:call, q, _args} <- nodes(body),
+          is_atom(q) and q not in scope,
+          do: q
+
+    case missing do
+      [] -> {:ok, scoped}
+      [name | _] -> {:error, {:relation_not_in_scope, %{relation: name}}}
     end
   end
 
@@ -246,7 +245,7 @@ defmodule Zkfol.Lang do
       for rel <- rels, do: :digraph.add_vertex(graph, rel.name)
 
       for rel <- rels,
-          callee <- Rel.calls(rel) ++ Rel.passes(rel),
+          {callee, _home} <- free(rel),
           :digraph.vertex(graph, callee) != false do
         :digraph.add_edge(graph, rel.name, callee)
       end
@@ -292,45 +291,57 @@ defmodule Zkfol.Lang do
   defp scoped({:reify, goal}, bound, scope), do: {:reify, scoped(goal, bound, scope)}
   defp scoped(leaf, _bound, _scope), do: leaf
 
-  @typep wanted :: {atom(), module() | nil, boolean()}
+  # Breadth first from the root, each relation adding those its free names answer to.
+  @spec grow([Rel.t()], %{atom() => Rel.t()}, [Rel.t()]) :: [Rel.t()]
+  defp grow([], _known, seen), do: Enum.reverse(seen)
 
-  @spec gather([wanted()], %{atom() => Rel.t()}, [Rel.t()]) ::
-          {:ok, [Rel.t()]} | {:error, Refusal.t()}
-  defp gather([], _known, seen), do: {:ok, Enum.reverse(seen)}
+  defp grow([rel | queue], known, seen) do
+    if Enum.any?(seen, &(&1.name == rel.name)) do
+      grow(queue, known, seen)
+    else
+      found =
+        for {name, home} <- free(rel),
+            found = known[name] || pulled(name, [home, Zkfol.FOL, Zkfol.Prims]),
+            do: found
 
-  defp gather([{name, home, needed?} | rest], known, seen) do
-    cond do
-      Enum.any?(seen, &(&1.name == name)) ->
-        gather(rest, known, seen)
-
-      rel = known[name] || pulled(name, [home, Zkfol.FOL, Zkfol.Prims]) ->
-        gather(rest ++ wants(rel), Map.put(known, name, rel), [rel | seen])
-
-      needed? ->
-        {:error, {:relation_not_in_scope, %{relation: name}}}
-
-      true ->
-        gather(rest, known, seen)
+      grow(queue ++ found, known, [rel | seen])
     end
   end
 
-  # A passed name is wanted where it resolves and no relation where it does not.
-  @spec wants(Rel.t()) :: [wanted()]
-  defp wants(rel = %Rel{home: home}) do
-    for {names, needed?} <- [{Rel.calls(rel), true}, {Rel.passes(rel), false}],
-        name <- names do
+  # The names each clause's body uses and its head does not bind, each with the module a
+  # qualified name points to.
+  @spec free(Rel.t()) :: [{atom(), module() | nil}]
+  defp free(%Rel{home: home, clauses: clauses}) do
+    for {head, body} <- clauses,
+        bound = MapSet.new(Term.names(head)),
+        node <- nodes(body),
+        name <- name(node),
+        not MapSet.member?(bound, name),
+        uniq: true do
       case name do
-        {mod, name} -> {name, mod, needed?}
-        name -> {name, home, needed?}
+        {mod, name} -> {name, mod}
+        name -> {name, home}
       end
     end
   end
 
+  # A callee, a partial call, or a variable; a callback is the head's variable.
+  @spec name(term()) :: [Term.name()]
+  defp name({:call, {:var, _callback}, _args}), do: []
+  defp name({tag, name, _args}) when tag in [:call, :papply], do: [name]
+  defp name({:var, name}), do: [name]
+  defp name(_node), do: []
+
+  # Every node of a term, each before its children.
+  @spec nodes(term()) :: [term()]
+  defp nodes(term), do: term |> Term.reduce([], &[&1 | &2]) |> Enum.reverse()
+
+  # Only a relation the module defines answers, never another function of its name.
   @spec pulled(atom(), [module() | nil]) :: Rel.t() | nil
   defp pulled(name, sources) do
     Enum.find_value(sources, fn source ->
-      source && Code.ensure_loaded?(source) && function_exported?(source, name, 0) &&
-        apply(source, name, [])
+      source && Code.ensure_loaded?(source) && function_exported?(source, :__relations__, 0) &&
+        name in source.__relations__() && apply(source, name, [])
     end)
   end
 end
