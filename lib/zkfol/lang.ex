@@ -151,6 +151,7 @@ defmodule Zkfol.Lang do
   defp term({:len, _meta, ctx}) when is_atom(ctx), do: :len
   defp term({:reify, _meta, [inner]}), do: {:reify, goal(inner, 0)}
   defp term(q) when is_integer(q), do: q
+  defp term(s) when is_binary(s), do: s |> String.to_charlist() |> term()
   defp term([]), do: nil
   defp term([{:|, _meta, [head, tail]}]), do: {:cons, term(head), term(tail)}
   defp term([head | tail]), do: {:cons, term(head), term(tail)}

@@ -202,6 +202,14 @@ defmodule Examples.EUser do
     Zkfol.FOL.each(rs, small_rows())
   end
 
+  defrel line("hello, world")
+  defrel line("hello; world")
+
+  defrel clean_line(s) do
+    line(s)
+    absent(?;, s)
+  end
+
   @spec fibonacci(pos_integer()) :: Statement.t()
   example fibonacci(n \\ 8) do
     {:ok, statement, _trace} = Pipeline.run(plain(), %Statement{rels: [fib()], args: [n]})
@@ -466,6 +474,16 @@ defmodule Examples.EUser do
     assert {:ok, phi} = Phi.lower(spiral, [spiral, doubled_fun()])
     assert Enum.take(Zkfol.stream([spiral, doubled_fun()], [[], :_]), 1) == [[[], 0]]
     phi
+  end
+
+  @doc "A string is the bracket of its codepoints: only the line without `;` derives."
+  @spec a_string_without_a_character() :: Statement.t()
+  example a_string_without_a_character do
+    ran = Zkfol.compile(clean_line(), args: [:_])
+
+    assert Enum.to_list(Zkfol.stream(clean_line(), [:_])) == [[~c"hello, world"]]
+    assert %Prover.Report{} = Log.report(Log.snapshot(), ran)
+    Log.Run.final_stage(ran)
   end
 
   @spec plain() :: Pipeline.t()
