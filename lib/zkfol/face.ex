@@ -215,7 +215,7 @@ defmodule Zkfol.Face do
       degree: uair.degree,
       shifts: Enum.map(uair.shifts, &Tuple.to_list/1),
       reads: reads,
-      kinds: kinds(uair.rows, reads, uair.shifts, uair.word_lookups),
+      kinds: kinds(uair.rows, reads, uair.shifts, uair.limbs),
       origins: Enum.map(uair.rows, &origin_text/1)
     }
   end
@@ -444,12 +444,12 @@ defmodule Zkfol.Face do
   defp mode_feed(_plain), do: []
 
   @spec kinds([pos_integer() | :x | :ones], [map()], [tuple()], [tuple()]) :: [atom()]
-  defp kinds(rows, reads, shifts, word_lookups) do
+  defp kinds(rows, reads, shifts, limbs) do
     bit = reads |> Enum.flat_map(& &1.bit_rows) |> MapSet.new()
     result = MapSet.new(reads, & &1.result_row)
     pointer = MapSet.new(reads, & &1.row)
     scheduled = MapSet.new(shifts, &elem(&1, 0))
-    ranged = MapSet.new(word_lookups, &elem(&1, 0))
+    ranged = MapSet.new(limbs, &elem(&1, 0))
     index = Enum.find_index(rows, &(&1 == :x))
 
     for i <- 0..(length(rows) - 1) do
@@ -457,9 +457,9 @@ defmodule Zkfol.Face do
         i in bit -> :bit
         i in result -> :result
         i in pointer -> :pointer
+        i in ranged -> :ranged
         i in scheduled -> :scheduled
         i == index -> :index
-        i in ranged -> :ranged
         true -> :plain
       end
     end
