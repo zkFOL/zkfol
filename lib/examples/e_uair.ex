@@ -143,6 +143,25 @@ defmodule Examples.EUair do
     long
   end
 
+  @doc "A branch reading a column back holds only where that column is in the trace."
+  @spec reads_back_inside_the_trace() :: Uair.t()
+  example reads_back_inside_the_trace do
+    counted =
+      Ast.disj([
+        Ast.conj([Ast.eq(Ast.x(), 1), Ast.eq(Ast.cell(1), 0)]),
+        Ast.eq(Ast.cell(1), Ast.add(Ast.at(1, :x, 1, -1), 1))
+      ])
+
+    {:ok, uair} = Uair.emit(counted, Interpretation.new([[0, 1, 2, 3, 4]]))
+    assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair)
+
+    # Counting from 96 at x = 1 would read 95 off the padding.
+    [_count | rest] = uair.columns
+    forged = %{uair | columns: [Enum.to_list(100..93//-1) | rest]}
+    assert {:error, {:verifier_rejected, _}} = Prover.prove_uair(forged)
+    uair
+  end
+
   @doc "A full trace reserves padding: the backend's exempt final row is never an actual cell."
   @spec the_exempt_row_is_padding() :: Uair.t()
   example the_exempt_row_is_padding do
@@ -331,7 +350,7 @@ defmodule Examples.EUair do
 
     assert uair.point_ties == []
     assert Uair.num_cols(uair) == 5
-    assert length(uair.program) == 91
+    assert length(uair.program) == 99
     assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair, name: :named_cells)
     uair
   end
