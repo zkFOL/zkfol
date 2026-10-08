@@ -1,6 +1,6 @@
 # Zkfol
 
-zkFOL in Elixir: the logic of *zk-SNARKs for First Order Logic* (Gabbay–Mendelsohn),
+zkFOL in Elixir: the logic of *Integer SNARKs for First-Order Logic* (Gabbay–Mendelsohn),
 arithmetised to a uniform AIR and proved through Zinc+. A single Elixir application
 drives the Zinc+ prover **in-process via a Rustler NIF** (not an external runner).
 
