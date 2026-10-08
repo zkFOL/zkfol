@@ -127,7 +127,7 @@ defmodule Examples.ESudoku do
 
     {:ok, uair} = Uair.emit(Statement.pred(statement), Statement.witness(statement))
 
-    assert uair.word_lookups == []
+    assert uair.limbs == []
     [%{values: values, selections: selections}] = uair.selected_lookups
     assert values == Enum.to_list(1..9)
     assert length(selections) == 27

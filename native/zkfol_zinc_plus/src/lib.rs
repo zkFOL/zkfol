@@ -97,7 +97,7 @@ struct Request {
     shifts: Vec<(usize, usize)>,
     program: Vec<(rustler::types::atom::Atom, i64)>,
     cells: Payload,
-    word_lookups: Vec<(usize, usize, usize)>,
+    word_lookups: Vec<(usize, usize)>,
     selected_lookups: Vec<Selected>,
     permuted_lookups: Vec<Permuted>,
     point_ties: Vec<Tie>,
