@@ -3,11 +3,11 @@ defmodule Zkfol.Lang.Term do
   I am the surface term: a polynomial over the leaves a clause writes, and the goals its
   body writes over me.
 
-  t    ::= q | t + t | t * t | len | var | nil | [t | t] | name(t, ...)
+  t    ::= q | t + t | t * t | len | var | nil | [t | t] | "s" | name(t, ...)
   goal ::= name(t, ...) | var(t, ...) | t = t | reify(goal)
 
   Scoped, a var is the clause's own and `name(t, ...)` a relation in scope with what it
-  fixes. Names work like any normal Elixir name.
+  fixes. Names work like any normal Elixir name. A string is the bracket of its codepoints.
   """
 
   @type name :: atom() | {module(), atom()}
@@ -49,12 +49,6 @@ defmodule Zkfol.Lang.Term do
     end)
     |> Enum.reverse()
   end
-
-  @doc "I am the relation a term passes and the arguments it fixes, nil where it passes none."
-  @spec passed(t(), MapSet.t()) :: {name(), [t()]} | nil
-  def passed({:papply, name, prefix}, _bound), do: {name, prefix}
-  def passed({:var, name}, bound), do: if(not MapSet.member?(bound, name), do: {name, []})
-  def passed(_term, _bound), do: nil
 
   @doc "I am the elements a closed bracket lists; a bracket open past a name lists none for sure."
   @spec closed(term()) :: [term()] | nil
