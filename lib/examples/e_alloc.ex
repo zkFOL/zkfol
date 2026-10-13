@@ -10,6 +10,7 @@ defmodule Examples.EAlloc do
   alias Zkfol.Alloc
   alias Zkfol.Interpretation
   alias Zkfol.Lay
+  alias Zkfol.Lang.Rel
   alias Zkfol.Phi
   alias Zkfol.Prover
 
@@ -128,6 +129,30 @@ defmodule Examples.EAlloc do
       assert Zkfol.Semantics.valid?(linked, Interpretation.new([[0]]))
       refute Zkfol.Semantics.valid?(linked, Interpretation.new([[1]]))
       alloc
+    end
+  end
+
+  @doc "Facts exclude an impossible alternative even after an ordinary call."
+  @spec clause_facts_ignore_call_order() :: [Prover.Report.t()]
+  example clause_facts_ignore_call_order do
+    x = {:var, :x}
+    y = {:var, :y}
+    helper = %Rel{name: :helper, arity: 0, clauses: [{[], []}]}
+    root = %Rel{name: :entry, arity: 2, clauses: [{[x, y], [{:call, :choice, [x, y]}]}]}
+
+    for body <- [[{:eq, 1, 2}, {:call, :helper, []}], [{:call, :helper, []}, {:eq, 1, 2}]] do
+      choice = %Rel{name: :choice, arity: 2, clauses: [{[x, x], []}, {[x, y], body}]}
+      rels = [root, choice, helper]
+      {:ok, pred, alloc} = Phi.compile(root, rels)
+      assert Alloc.width(alloc) == 3
+      {:ok, derivation} = Al.derived(rels, [7, 7])
+      lay = Lay.of(derivation, alloc)
+      {:ok, claims} = Lay.claims(lay, [1, 2])
+
+      assert {:ok, report, _id} =
+               Prover.prove(Alloc.link(pred, alloc), Lay.witness(lay), claims: claims)
+
+      report
     end
   end
 end

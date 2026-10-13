@@ -195,12 +195,11 @@ defmodule Zkfol.Lay do
   defp kind(%Alloc.Member{}), do: :member
 
   @doc """
-  I am where the `index`-th cell of `slot`'s run stands: an address in the column
-  its member stands at, which `Ast.column/2` reads as a number.
+  I am the fixed address of the `index`-th element in a bank's declared extent.
   """
   @spec at(Slot.t(), non_neg_integer()) :: Ast.address()
-  def at(%Slot{allocation: {:bank, _name, {:at, base, mul, add}}}, index) do
-    Ast.address(base, mul, add - index)
+  def at(%Slot{allocation: {:bank, _name, extent}}, index) do
+    Ast.address(:x, 0, extent + 1 - index)
   end
 
   ############################################################
@@ -289,10 +288,13 @@ defmodule Zkfol.Lay do
          do: {:ok, [index - origin]}
   end
 
-  defp columns(%Slot{allocation: {:bank, bank, _}} = slot, member, nil, lay) do
-    with {:ok, {cells, x}} <-
-           held(bank_values(slot, member, lay), {:beyond_the_rows, %{sequence: bank}}),
-         do: {:ok, for(p <- (length(cells) - 1)..0//-1, do: Ast.column(at(slot, p), x))}
+  defp columns(%Slot{allocation: {:bank, bank, extent}}, %Member{name: name}, nil, lay) do
+    with {:ok, _stand} <-
+           held(
+             Enum.find(lay.stands, &(&1.member == name)),
+             {:beyond_the_rows, %{sequence: bank}}
+           ),
+         do: {:ok, Enum.to_list(2..(extent + 1)//1)}
   end
 
   defp columns(_slot, %Member{name: name}, nil, %__MODULE__{stands: stands}) do
@@ -301,14 +303,6 @@ defmodule Zkfol.Lay do
     with {:ok, %{fact: fact}} <- held(stood, {:beyond_the_rows, %{relation: name}}),
          do:
            {:ok, for(stand <- stands, stand.member == name, stand.fact == fact, do: stand.column)}
-  end
-
-  @spec bank_values(Slot.t(), Member.t(), t()) :: {[term()], pos_integer()} | nil
-  defp bank_values(slot, %Member{name: name}, %__MODULE__{} = lay) do
-    with %{bindings: bindings, column: x} <- Enum.find(lay.stands, &(&1.member == name)),
-         {^slot, cells} when is_list(cells) <- List.keyfind(bindings, slot, 0),
-         do: {cells, x},
-         else: (_unheld -> nil)
   end
 
   @spec descend(:queue.queue(), t(), map(), map(), MapSet.t()) :: t()
@@ -320,7 +314,8 @@ defmodule Zkfol.Lay do
       {{:value, {{_relation, tuple} = fact, name, aim}}, rest} ->
         member = index.members[name]
         {column, taken} = placed(aim, member, tuple, Map.get(occupied, name, %{}))
-        key = {name, fact, column}
+        # Pointer calls share one fact; fixed addresses still require their own copies.
+        key = {name, fact, if(is_integer(aim), do: column, else: :free)}
 
         if MapSet.member?(seen, key) do
           descend(rest, lay, index, occupied, seen)
@@ -453,15 +448,21 @@ defmodule Zkfol.Lay do
     for {value, row} <- Enum.zip(fixed, rows), do: {{Alloc.row(alloc, row), x}, value}
   end
 
+  defp spread({%Slot{allocation: {:record, rows}}, values}, x, alloc),
+    do:
+      for(
+        {row, value} <- Enum.zip(rows, List.flatten(List.wrap(values))),
+        do: {{Alloc.row(alloc, row), x}, value}
+      )
+
   defp spread({%Slot{allocation: {:cell, ref}}, value}, x, alloc),
     do: [{{Alloc.row(alloc, ref), x}, value}]
 
   defp spread({%Slot{allocation: {:node, ref}}, value}, x, alloc),
     do: [{{Alloc.row(alloc, ref), x}, {:node, value}}]
 
-  # A held bank is laid ending at column one, so its head is at column length + 1. The
-  # pointer cell on the member's column holds that column.
-  defp spread({slot = %Slot{allocation: {:bank, bank, address}}, values}, x, alloc)
+  # Owned banks have fixed extents; borrowed views spend no storage here.
+  defp spread({slot = %Slot{allocation: {:bank, bank, extent}}, values}, _x, alloc)
        when is_list(values) do
     rows = Alloc.slot_rows(alloc, slot)
 
@@ -469,38 +470,19 @@ defmodule Zkfol.Lay do
       for ref = {Zkfol.Nodes, {:suffix, {^bank, _element}}} <- Alloc.refs(alloc),
           do: Alloc.row(alloc, ref)
 
-    {pointer, base} =
-      case address do
-        {:at, {:cell, ref}, _m, _a} ->
-          {[{{Alloc.row(alloc, ref), x}, length(values) + 1}], length(values) + 1}
+    Enum.flat_map(Enum.with_index(values), fn {value, p} ->
+      column = extent + 1 - p
 
-        {:at, :x, _m, _a} ->
-          {[], x}
-      end
+      cells =
+        for {cell, row} <- Enum.zip(List.flatten(List.wrap(value)), rows),
+            do: {{Alloc.row(alloc, row), column}, cell}
 
-    pointer ++
-      Enum.flat_map(Enum.with_index(values), fn {value, p} ->
-        column = Ast.column(at(slot, p), base)
-
-        cells =
-          for {cell, row} <- Enum.zip(row_values(value, length(rows)), rows),
-              do: {{Alloc.row(alloc, row), column}, cell}
-
-        nodes = for row <- suffix_rows, do: {{row, column}, {:node, Enum.drop(values, p)}}
-        [{{Alloc.presence(alloc, bank), column}, 1} | cells ++ nodes]
-      end)
+      nodes = for row <- suffix_rows, do: {{row, column}, {:node, Enum.drop(values, p)}}
+      [{{Alloc.presence(alloc, bank), column}, 1} | cells ++ nodes]
+    end)
   end
 
   defp spread(_unallocated, _x, _alloc), do: []
-
-  # An inner bracket is an earlier dimension, so its cells run onto rows first.
-  @spec row_values(term(), non_neg_integer()) :: [term()]
-  defp row_values(_cells, 0), do: []
-  defp row_values([], k), do: List.duplicate(0, k)
-  defp row_values([cell | tail], k) when is_list(cell), do: row_values(cell ++ tail, k)
-  defp row_values([head | tail], k), do: [head | row_values(tail, k - 1)]
-  defp row_values(cell, 1), do: [cell]
-  defp row_values(_ended, k), do: List.duplicate(0, k)
 end
 
 defimpl Inspect, for: Zkfol.Lay do

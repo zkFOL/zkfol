@@ -23,18 +23,19 @@ defmodule Examples.EProgramSpace do
   @typedoc "One program: the choices that named it, its relations root first, its arguments."
   @type program :: {String.t(), [Rel.t()], [Statement.datum() | :_]}
 
-  @typedoc "One stage of a program: the choice that named it and the relations it stands on."
-  @type stage :: {String.t(), [Rel.t()]}
+  @typedoc "One stage: the choice that named it, its relations, the cells it adds to its bank (nil folds it)."
+  @type stage :: {String.t(), [Rel.t()], non_neg_integer() | nil}
 
   @doc "I am every composition the grammar writes, each named by its stages."
   @spec space() :: [program()]
   def space() do
-    for {producer, prod, datum} <- producers(),
-        {middle, mid} <- [{"", []} | banks(:m)],
-        {consumer, con} <- consumers() do
+    for {producer, prod, datum, n} <- producers(),
+        {middle, mid, k1} <- [{"", [], 0} | banks(:s2)],
+        {consumer, con, k2} <- consumers() do
       stages = for rels <- [prod, mid, con], rels != [], do: hd(rels).name
       label = [producer, middle, consumer] |> Enum.reject(&(&1 == "")) |> Enum.join(" -> ")
-      {label, [chain(stages) | prod ++ mid ++ con], [datum, :_]}
+      returned = if k1 && k2, do: [n + k1 + k2]
+      {label, [chain(stages, [dimensions(datum), returned]) | prod ++ mid ++ con], [datum, :_]}
     end
   end
 
@@ -99,50 +100,59 @@ defmodule Examples.EProgramSpace do
   @spec banks(atom()) :: [stage()]
   defp banks(tag) do
     [
-      {"walk1", [walker(tag, 1, :self)]},
-      {"walk2", [walker(tag, 2, :self)]},
-      {"walk1>2", handoff(tag, 1, 2)},
-      {"carried9", [carried(tag, [9])]},
-      {"mapped", mapped(tag)},
-      {"guarded", [guarded(walker(tag, 1, :self))]}
+      {"walk1", [walker(tag, 1, :self)], 0},
+      {"walk2", [walker(tag, 2, :self)], 0},
+      {"walk1>2", handoff(tag, 1, 2), 0},
+      {"carried9", [carried(tag, [9])], 1},
+      {"mapped", mapped(tag), 0},
+      {"guarded", [guarded(walker(tag, 1, :self))], 0}
     ]
   end
 
-  @spec producers() :: [{String.t(), [Rel.t()], Statement.datum()}]
+  # A producer names the length of the bank it makes.
+  @spec producers() :: [{String.t(), [Rel.t()], Statement.datum(), pos_integer()}]
   defp producers() do
     bank = [1, 2, 3, 4]
 
     [
-      {"walk1", [walker(:p, 1, :self)], bank},
-      {"walk2", [walker(:p, 2, :self)], bank},
-      {"walk2>1", handoff(:p, 2, 1), bank},
-      {"matrix", [matrix_rows(:p)], [[1, 2], [3, 4]]},
-      {"table0", [table(:p, 0)], 3},
-      {"table1", [table(:p, 1)], 3},
-      {"shifted", shifted(:p), 3},
-      {"reduced", [reduced(:p)], 5}
+      {"walk1", [walker(:s1, 1, :self)], bank, 4},
+      {"walk2", [walker(:s1, 2, :self)], bank, 4},
+      {"walk2>1", handoff(:s1, 2, 1), bank, 4},
+      {"matrix", [matrix_rows(:s1)], [[1, 2], [3, 4]], 2},
+      {"table0", [table(:s1, 0)], 3, 3},
+      {"table1", [table(:s1, 1)], 3, 2},
+      {"shifted", shifted(:s1), 3, 3},
+      {"reduced", [reduced(:s1)], 5, 10}
     ]
   end
 
   @spec consumers() :: [stage()]
   defp consumers() do
-    banks(:c) ++
+    banks(:s3) ++
       [
-        {"carried98", [carried(:c, [9, 8])]},
-        {"summed", [summed(:c, :after)]},
-        {"summed ahead", [summed(:c, :ahead)]},
-        {"cell2", [cell_of(:c, :literal)]},
-        {"cell1+1", [cell_of(:c, :computed)]},
-        {"hopped", hopped(:c)}
+        {"carried98", [carried(:s3, [9, 8])], 2},
+        {"summed", [summed(:s3, :after)], nil},
+        {"summed ahead", [summed(:s3, :ahead)], nil},
+        {"cell2", [cell_of(:s3, :literal)], nil},
+        {"cell1+1", [cell_of(:s3, :computed)], nil},
+        {"hopped", hopped(:s3), nil}
       ]
   end
 
-  # The root: each stage handed what the stage before it made.
-  @spec chain([atom()]) :: Rel.t()
-  defp chain(stages) do
+  # The root: each stage handed what the stage before it made. The root declares the banks it
+  # takes and returns; a declared local would only add cells beside the stage that fills it.
+  @spec chain([atom()], [[pos_integer()] | nil]) :: Rel.t()
+  defp chain(stages, dims) do
     ports = for k <- 0..length(stages), do: v(:"v#{k}")
     body = for {stage, k} <- Enum.with_index(stages), do: {:call, stage, Enum.slice(ports, k, 2)}
-    rel(:main, [{[hd(ports), List.last(ports)], body}])
+    params = [hd(ports), List.last(ports)]
+
+    declared =
+      for {port, dims} <- Enum.zip(params, dims),
+          dims != nil,
+          do: {:call, :array, [bracket(dims, nil), port]}
+
+    rel(:main, [{params, body ++ declared}])
   end
 
   ############################################################
@@ -319,6 +329,11 @@ defmodule Examples.EProgramSpace do
   @spec compared([Term.t()]) :: [Term.goal()]
   defp compared([{:cons, {:var, x}, _rest} | _args]), do: [{:call, :gt, [v(x), 0, v(:_s0)]}]
   defp compared(_head), do: []
+
+  @spec dimensions(Statement.datum()) :: [pos_integer()] | nil
+  defp dimensions([row | _] = rows) when is_list(row), do: [length(rows), length(row)]
+  defp dimensions(cells) when is_list(cells), do: [length(cells)]
+  defp dimensions(_scalar), do: nil
 
   @spec rel(atom(), [{[Term.t()], [Term.goal()]}]) :: Rel.t()
   defp rel(name, clauses),

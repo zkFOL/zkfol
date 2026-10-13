@@ -84,16 +84,6 @@ defmodule Examples.EPhi do
     delegated(n + 1, second)
   end
 
-  @spec recursive_relations() :: MapSet.t(atom())
-  example recursive_relations do
-    {:ok, relations} =
-      Zkfol.Lang.reached(wrapped_calls(), [wrapped_calls(), EAlloc.delegated(), EAlloc.held()])
-
-    recursive = Zkfol.Lang.recursive(relations)
-    assert recursive == MapSet.new([:held])
-    recursive
-  end
-
   @doc "The wrapper leaves no member; both of its calls lay from the one fact they consume."
   @spec wrapped() :: Statement.t()
   example wrapped do

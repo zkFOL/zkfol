@@ -151,6 +151,17 @@ defmodule Zkfol.Lang do
   defp term({:len, _meta, ctx}) when is_atom(ctx), do: :len
   defp term({:reify, _meta, [inner]}), do: {:reify, goal(inner, 0)}
   defp term(q) when is_integer(q), do: q
+
+  defp term({:<<>>, _meta, parts}) do
+    {prefix, tail} =
+      case List.pop_at(parts, -1) do
+        {{:"::", _, [tail, {:array, _, _}]}, prefix} -> {prefix, term(tail)}
+        _closed -> {parts, nil}
+      end
+
+    Enum.reduce(Enum.reverse(prefix), tail, &{:cons, term(&1), &2})
+  end
+
   defp term([]), do: nil
   defp term([{:|, _meta, [head, tail]}]), do: {:cons, term(head), term(tail)}
   defp term([head | tail]), do: {:cons, term(head), term(tail)}
@@ -228,31 +239,6 @@ defmodule Zkfol.Lang do
            gather([{root.name, root.home, true}], Map.new(rels, &{&1.name, &1}), []) do
       scope = MapSet.new(reached, & &1.name)
       {:ok, for(rel <- reached, do: scoped(rel, scope))}
-    end
-  end
-
-  @doc """
-  I return the recursive relation names in a resolved program.
-
-  Calls and passed relations form a directed graph. A relation is recursive when it
-  belongs to a cycle; calling a recursive relation does not itself make a caller recursive.
-  """
-  @spec recursive([Rel.t()]) :: MapSet.t(atom())
-  def recursive(rels) do
-    graph = :digraph.new()
-
-    try do
-      for rel <- rels, do: :digraph.add_vertex(graph, rel.name)
-
-      for rel <- rels,
-          callee <- Rel.calls(rel) ++ Rel.passes(rel),
-          :digraph.vertex(graph, callee) != false do
-        :digraph.add_edge(graph, rel.name, callee)
-      end
-
-      graph |> :digraph_utils.cyclic_strong_components() |> List.flatten() |> MapSet.new()
-    after
-      :digraph.delete(graph)
     end
   end
 

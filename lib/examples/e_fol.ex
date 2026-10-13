@@ -28,15 +28,18 @@ defmodule Examples.EFol do
   end
 
   defrel columns_apart(x) do
+    array([9, 9], x)
     column(x, cols)
     each(cols, permutation(9))
   end
 
   defrel literal_columns(cs) do
+    array([2, 2], cs)
     column([[1, 2], [3, 4]], cs)
   end
 
   defrel there_and_back(x) do
+    array([9, 9], x)
     column(x, cs)
     column(cs, back)
     each(back, permutation(9))
@@ -44,6 +47,11 @@ defmodule Examples.EFol do
 
   defrel bumped(ys) do
     Zkfol.FOL.map([1, 2, 3], Examples.EUser.succ(), ys)
+  end
+
+  defrel rising_three(xs) do
+    array([3], xs)
+    rising(xs)
   end
 
   defrel rising([_last])
@@ -153,12 +161,12 @@ defmodule Examples.EFol do
   @spec a_read_value_is_laid() :: [atom()]
   example a_read_value_is_laid do
     {:ok, statement, _trace} =
-      Pipeline.run(EUser.plain(), %Statement{rels: [rising()], args: [[1, 2, 3]]})
+      Pipeline.run(EUser.plain(), %Statement{rels: [rising_three()], args: [[1, 2, 3]]})
 
     names = Alloc.names(Statement.alloc(statement))
 
-    assert :rising in names
-    assert :"rising a1" in names
+    assert :rising_three in names
+    assert :"rising_three xs" in names
     names
   end
 
