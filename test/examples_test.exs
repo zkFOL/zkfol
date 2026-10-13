@@ -16,6 +16,7 @@ for module <-
         Examples.ERefusal,
         Examples.EAl,
         Examples.EAlloc,
+        Examples.EArrays,
         Examples.EPhi,
         Examples.ENodes,
         Examples.ESudoku,

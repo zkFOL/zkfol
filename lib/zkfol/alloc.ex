@@ -22,7 +22,8 @@ defmodule Zkfol.Alloc do
   Where a parameter stands relative to its member's column.
 
       {:cell, ref}            a scalar on my member’s column
-      {:bank, name, address}   a sequence in the named bank, its head at the address
+      {:record, rows}         an array flattened across rows at my member’s column
+      {:bank, name, extent}    a fixed sequence ending at column one in the named bank
       {:column, origin}        the column itself, X + origin; no row
       {:node, ref}             a term identity on a row at my member’s column
       {:rel, name, rows}       a relation passed by name, its fixed arguments on these rows
@@ -30,8 +31,9 @@ defmodule Zkfol.Alloc do
   """
   @type allocation ::
           {:cell, Ast.row_ref()}
+          | {:record, [Ast.row_ref()]}
           | {:rel, atom(), [Ast.row_ref()]}
-          | {:bank, atom(), Ast.address()}
+          | {:bank, atom(), non_neg_integer()}
           | {:column, integer()}
           | {:node, Ast.row_ref()}
           | :none
@@ -69,7 +71,6 @@ defmodule Zkfol.Alloc do
     typedstruct enforce: true do
       field(:name, atom())
       field(:depth, pos_integer())
-      field(:element, Zkfol.Phi.Shape.t(), default: :unknown)
     end
 
     @doc "I am the name of the bank a parameter's cells stand in."
@@ -131,12 +132,13 @@ defmodule Zkfol.Alloc do
 
   @doc "I am the symbolic rows a slot uses; a bank owns its dimensions."
   @spec slot_rows(t(), Slot.t()) :: [Ast.row_ref()]
-  def slot_rows(alloc, %Slot{allocation: {:bank, name, _address}}) do
+  def slot_rows(alloc, %Slot{allocation: {:bank, name, _extent}}) do
     %Bank{depth: depth} = member(alloc, name)
     Bank.rows(name, depth)
   end
 
   def slot_rows(_alloc, %Slot{allocation: {kind, ref}}) when kind in [:cell, :node], do: [ref]
+  def slot_rows(_alloc, %Slot{allocation: {:record, rows}}), do: rows
   def slot_rows(_alloc, %Slot{}), do: []
 
   @doc "I give pointer and term identities a valid padding value; other rows pad zero."
@@ -152,8 +154,7 @@ defmodule Zkfol.Alloc do
                 %Site{address: {:at, {:cell, ref}, _m, _a}} <- calls,
                 do: ref
 
-          held = for %Slot{allocation: {:bank, _, {:at, {:cell, ref}, _, _}}} <- slots, do: ref
-          nodes ++ pointers ++ held
+          nodes ++ pointers
 
         %Zkfol.Nodes{refs: refs} ->
           for {Zkfol.Nodes, field} = ref <- refs, field not in [:tag, :value], do: ref
@@ -257,12 +258,11 @@ defmodule Zkfol.Alloc do
     Bank.rows(name, depth)
   end
 
-  # A bank held behind a pointer spends the parameter's own row for the pointer.
   defp spent(%Member{slots: slots}) do
     Enum.flat_map(slots, fn
       %Slot{allocation: {kind, ref}} when kind in [:cell, :node] -> [ref]
+      %Slot{allocation: {:record, rows}} -> rows
       %Slot{allocation: {:rel, _name, rows}} -> rows
-      %Slot{allocation: {:bank, _name, {:at, {:cell, ref}, _m, _a}}} -> [ref]
       _slot -> []
     end)
   end

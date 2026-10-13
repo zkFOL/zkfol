@@ -8,6 +8,7 @@ defmodule Examples.EUser do
 
   alias Zkfol.Alloc
   alias Zkfol.Alloc.Slot
+  alias Zkfol.Derivation
   alias Zkfol.Ast
   alias Zkfol.Interpretation
   alias Zkfol.Lang.Rel
@@ -156,7 +157,9 @@ defmodule Examples.EUser do
     nth(i, c, v)
   end
 
-  defrel topped([a, b, c | _rest]) do
+  defrel topped(a1) do
+    array([4], a1)
+    a1 = [a, b, c | _rest]
     permutation(3, [a, b, c])
   end
 
@@ -173,6 +176,11 @@ defmodule Examples.EUser do
     x > 0
     from_zero(x - 1, w)
     v = w + 1
+  end
+
+  defrel matrix_sum(a1, s) do
+    array([2, 2], a1)
+    rows(a1, s)
   end
 
   defrel rows([], 0)
@@ -199,6 +207,7 @@ defmodule Examples.EUser do
   end
 
   defrel cells_ok(rs) do
+    array([2, 2], rs)
     Zkfol.FOL.each(rs, small_rows())
   end
 
@@ -207,8 +216,9 @@ defmodule Examples.EUser do
     {:ok, statement, _trace} = Pipeline.run(plain(), %Statement{rels: [fib()], args: [n]})
 
     witness = Statement.witness(statement)
-    assert witness |> Interpretation.rows() |> Enum.at(0) == Enum.map(1..n, &fib/1)
-    assert Enum.all?(1..n, &Semantics.holds?(Statement.pred(statement), witness, &1))
+    assert Derivation.root(Statement.derivation(statement), :fib) == {:fib, [n, fib(n)]}
+    assert Interpretation.at(witness, 2, 1) == fib(n)
+    assert Semantics.valid?(Statement.pred(statement), witness)
     statement
   end
 
@@ -216,7 +226,7 @@ defmodule Examples.EUser do
   example registers(n \\ 8) do
     {:ok, statement, _trace} = Pipeline.run(plain(), %Statement{rels: [regs()], args: [n]})
 
-    assert Interpretation.at(Statement.witness(statement), 2, n) == fib(n)
+    assert Interpretation.at(Statement.witness(statement), 3, 1) == fib(n)
     statement
   end
 
@@ -225,7 +235,7 @@ defmodule Examples.EUser do
     source = %Statement{rels: [regsm()], args: [n, :_, :_, :_]}
     {:ok, statement, _trace} = Pipeline.run(plain(), source)
 
-    assert Interpretation.at(Statement.witness(statement), 1, n) == rem(fib(n + 1), 7919)
+    assert Interpretation.at(Statement.witness(statement), 2, 1) == rem(fib(n + 1), 7919)
     statement
   end
 
@@ -266,16 +276,16 @@ defmodule Examples.EUser do
     source = %Statement{rels: [power_rel(2)], args: [exponent + 1]}
     {:ok, statement, _trace} = Pipeline.run(plain(), source)
 
-    assert Interpretation.at(Statement.witness(statement), 3, exponent + 1) == 2 ** exponent
+    assert Interpretation.at(Statement.witness(statement), 4, 1) == 2 ** exponent
     statement
   end
 
-  @doc "Two recurrences read at one index: their facts share the column."
+  @doc "Two recurrences take the same private index and return independently addressed facts."
   @spec shared_index(pos_integer()) :: Statement.t()
   example shared_index(n \\ 8) do
     source = %Statement{rels: [paired(), fib(), offset()], args: [n]}
     {:ok, statement, _trace} = Pipeline.run(plain(), source)
-    value = fn name -> statement |> Statement.bank(name) |> hd() |> List.last() end
+    value = fn name -> statement |> Statement.bank(name) |> Enum.at(1) |> hd() end
 
     assert value.(:fib) == fib(n)
     assert value.(:offset) == 5 * n - 4
@@ -286,7 +296,7 @@ defmodule Examples.EUser do
     statement
   end
 
-  @doc "A walk is a column per step, so one predicate stands at any length."
+  @doc "An undeclared list uses heap storage and shares one predicate across lengths."
   @spec doubles(pos_integer()) :: Statement.t()
   example doubles(n \\ 3) do
     statement = Log.Run.final_stage(Zkfol.emit(doubled(), args: [Enum.to_list(1..n), :_]))
@@ -319,7 +329,7 @@ defmodule Examples.EUser do
     Log.Run.final_stage(ran)
   end
 
-  @doc "A bank a strided walk wrote is carried on whole: two members hold the cells they share."
+  @doc "A list a strided walk constructed is handed to append without changing its values."
   @spec tacked_bank() :: Statement.t()
   example tacked_bank do
     statement = Log.Run.final_stage(Zkfol.emit(tacked(), args: [[1, 2], :_]))
@@ -340,7 +350,7 @@ defmodule Examples.EUser do
     statement
   end
 
-  @doc "A reading takes a bank the run wrote as the cells standing on its member's rows."
+  @doc "An indexed read selects from the list another relation constructed."
   @spec indexed_cell() :: Statement.t()
   example indexed_cell do
     statement = Log.Run.final_stage(Zkfol.emit(cell_of(), args: [3, :_]))
@@ -349,12 +359,12 @@ defmodule Examples.EUser do
     statement
   end
 
-  @doc "An index spends no row, so its opening claims the presence whose column names it."
+  @doc "A private index opens its value cell and the presence of its fact."
   @spec opened_index(pos_integer()) :: Statement.t()
   example opened_index(n \\ 8) do
     {:ok, statement} = Statement.opened(fibonacci(n), [1])
 
-    assert Statement.claims(statement) == [{"fib.x", 2, n}]
+    assert Statement.claims(statement) == [{"fib.x", 1, 1}, {"in", 5, 1}]
     statement
   end
 
@@ -377,7 +387,7 @@ defmodule Examples.EUser do
 
     assert Enum.take(Zkfol.stream(topped(), [[3, 1, 2, 4]]), 1) == [[[3, 1, 2, 4]]]
 
-    assert [%Slot{name: :a1, allocation: {:bank, :"topped a1", {:at, :x, 0, 5}}}] =
+    assert [%Slot{name: :a1, allocation: {:bank, :"topped a1", 4}}] =
              hd(Statement.alloc(statement).members).slots
 
     assert Statement.bank(statement, :"topped a1") == [[0, 4, 2, 1, 3]]
@@ -385,23 +395,30 @@ defmodule Examples.EUser do
     statement
   end
 
-  @doc "An index counts from where a base clause of it starts, a column from one."
+  @doc "A zero-based recurrence keeps its index as a private scalar."
   @spec zero_based(non_neg_integer()) :: Statement.t()
   example zero_based(n \\ 3) do
     statement = Log.Run.final_stage(Zkfol.emit(from_zero(), args: [n, :_]))
 
     assert Enum.take(Zkfol.stream(from_zero(), [n, :_]), 1) == [[n, n + 1]]
-    assert Statement.bank(statement, :from_zero) == [Enum.to_list(1..(n + 1))]
+
+    assert Statement.bank(statement, :from_zero) |> Enum.take(2) ==
+             [Enum.to_list(n..0//-1), Enum.to_list((n + 1)..1//-1)]
+
     statement
   end
 
-  @doc "An inner bracket is an earlier dimension: two rows a column, the columns the walk."
+  @doc "A declared matrix keeps each two-element row together while a recursive fold sums it."
   @spec row_sums() :: Statement.t()
   example row_sums do
-    statement = Log.Run.final_stage(Zkfol.emit(rows(), args: [[[3, 4], [5, 6]], :_]))
+    statement =
+      Log.Run.final_stage(Zkfol.emit(matrix_sum(), args: [[[3, 4], [5, 6]], :_]))
 
-    assert Statement.bank(statement, :rows) == [[0, 11, 18]]
-    assert Statement.bank(statement, :"rows a1") == [[0, 5, 3], [0, 6, 4]]
+    assert Derivation.root(Statement.derivation(statement), :matrix_sum) ==
+             {:matrix_sum, [[[3, 4], [5, 6]], 18]}
+
+    assert Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
+    assert Statement.bank(statement, :"matrix_sum a1") == [[0, 5, 3], [0, 6, 4]]
     statement
   end
 
@@ -410,7 +427,7 @@ defmodule Examples.EUser do
   example rows_without_a_shape_hint(relation \\ rows()) do
     {:ok, pred, alloc} = Phi.compile(relation)
     pred = Alloc.link(pred, alloc)
-    assert [%Alloc.Bank{depth: 2}] = Enum.filter(alloc.members, &is_struct(&1, Alloc.Bank))
+    refute Enum.any?(alloc.members, &is_struct(&1, Alloc.Bank))
 
     for grid <- [[[3, 4], [5, 6]], [[1, 2], [3, 4], [5, 6]]] do
       {:ok, derivation} = Zkfol.Al.derived(relation, [grid, :_])

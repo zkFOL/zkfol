@@ -98,8 +98,10 @@ defmodule Zkfol.Refusal do
   defp said({:unliftable_term, %{term: term}}),
     do: {:restructure, "no clause lowers the term #{inspect(term)}"}
 
-  defp said({:unroll_budget, %{relation: name}}),
-    do: {:restructure, "saying #{name} in place ran past the unroll budget; no clause of it ends"}
+  defp said({:array_shape, %{dimensions: dimensions}}),
+    do:
+      {:restructure,
+       "array dimensions must be static nonnegative integers: #{inspect(dimensions)}"}
 
   defp said({:unliftable_count, %{}}),
     do: {:restructure, "the call's count lifts to no frame, and no pointer stands for it"}

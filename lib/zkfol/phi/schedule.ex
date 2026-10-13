@@ -1,130 +1,60 @@
 defmodule Zkfol.Phi.Schedule do
   @moduledoc """
-  I schedule clause goals, retrying an equation when a binding it needs changes.
+  I run one worklist per member. Inlined bodies join that worklist, so their bindings
+  are available to every waiting goal. Each item retains its original source context.
 
-  Identical goals are scheduled once, keeping their first source position.
-  Ready goals run in source order. Awakened goals run after the current ready list,
-  also in source order. `blocked` records each goal's dependencies; `waiting`
-  indexes those same dependencies by name so unrelated goals need no revisiting.
+  A round runs ready goals in order and retains waits. If bindings changed, another
+  round retries those waits. At a fixed point the caller may settle storage demands.
 
   ### Public API
 
-  - `new/1`, `next/1`: start a clause and take its next goal.
-  - `run/3`: interpret goals, retrying those whose dependencies change.
-  - `wait/3`: retain the bindings a goal needs.
-  - `wake/2`: schedule the goals waiting for changed bindings.
+  - `run/4`: run goals, expanding calls and retrying waits until bindings settle.
   """
 
-  use TypedStruct
-
-  alias Zkfol.Lang.Term
   alias Zkfol.Phi.{Expression, Walk}
 
-  typedstruct do
-    field(:goals, tuple(), enforce: true)
-    field(:ready, [{term(), non_neg_integer()}], default: [])
-    field(:awakened, MapSet.t(non_neg_integer()), default: MapSet.new())
-    field(:blocked, %{non_neg_integer() => [Expression.name()]}, default: %{})
-    field(:waiting, %{Expression.name() => MapSet.t(non_neg_integer())}, default: %{})
-  end
+  defmodule Expansion do
+    @moduledoc "I add an inlined body's scoped goals and head bindings to the current worklist."
+    use TypedStruct
 
-  @doc "I schedule each distinct goal at its first source position."
-  @spec new([term()]) :: t()
-  def new(goals) do
-    ready = Enum.uniq_by(Enum.with_index(goals), &elem(&1, 0))
-    %__MODULE__{goals: List.to_tuple(goals), ready: ready}
-  end
-
-  @doc "I run a clause with the given goal interpreter; unresolved dependencies cause a refusal."
-  @spec run(t(), Walk.t(), (term(), non_neg_integer(), Walk.t() ->
-                              Walk.t() | :dead | Expression.waiting())) :: Walk.t() | :dead
-  def run(schedule, walk, interpret) do
-    case next(schedule) do
-      :done ->
-        walk
-
-      {:blocked, goals} ->
-        throw({:refused, {:unbound_variable, %{goals: goals}}})
-
-      {:ok, goal, k, schedule} ->
-        case interpret.(goal, k, walk) do
-          :dead ->
-            :dead
-
-          {:waiting, names} ->
-            run(wait(schedule, k, names), walk, interpret)
-
-          more = %Walk{} when map_size(schedule.blocked) == 0 ->
-            run(schedule, more, interpret)
-
-          more = %Walk{} ->
-            # A goal can bind a name behind an alias without replacing the alias itself.
-            dependencies =
-              for name <- Term.names(goal),
-                  dependency <- [name | Term.names(Expression.substitute({:var, name}, walk))],
-                  uniq: true,
-                  do: dependency
-
-            changed =
-              for name <- dependencies,
-                  Map.get(walk.env, name, :fresh) != Map.get(more.env, name, :fresh),
-                  do: name
-
-            run(wake(schedule, changed), more, interpret)
-        end
+    typedstruct enforce: true do
+      field(:goals, [term()])
+      field(:walk, Walk.t())
     end
   end
 
-  @doc "I take the next goal, finish, or return the goals whose dependencies remain unmet."
-  @spec next(t()) :: {:ok, term(), non_neg_integer(), t()} | :done | {:blocked, [term()]}
-  def next(schedule = %__MODULE__{ready: [{goal, k} | rest]}),
-    do: {:ok, goal, k, %{schedule | ready: rest}}
+  @type result :: Walk.t() | :dead | Expression.waiting() | Expansion.t()
 
-  def next(schedule = %__MODULE__{ready: []}) do
-    cond do
-      MapSet.size(schedule.awakened) > 0 ->
-        ready = for k <- Enum.sort(schedule.awakened), do: {elem(schedule.goals, k), k}
-        next(%{schedule | ready: ready, awakened: MapSet.new()})
+  @doc "I run goals, preserving partial progress through inlined calls and deferred bindings."
+  @spec run([term()], Walk.t(), (term(), Walk.t() -> result()), (Walk.t(),
+                                                                 [Expression.dependency()] ->
+                                                                   Walk.t() | Expression.waiting())) ::
+          Walk.t() | :dead | Expression.waiting()
+  def run(goals, walk, interpret, settle),
+    do: resume(goals, [], walk.env, walk, interpret, settle)
 
-      map_size(schedule.blocked) == 0 ->
-        :done
+  defp resume([], [], _before, walk, _interpret, _settle), do: walk
 
-      true ->
-        {:blocked, for(k <- Enum.sort(Map.keys(schedule.blocked)), do: elem(schedule.goals, k))}
+  defp resume([], blocked, before, walk, interpret, settle) do
+    {goals, dependencies} = blocked |> Enum.reverse() |> Enum.unzip()
+    names = dependencies |> List.flatten() |> Enum.uniq()
+    more = if walk.env == before, do: settle.(walk, names), else: walk
+    with %Walk{} <- more, do: run(goals, more, interpret, settle)
+  end
+
+  defp resume([goal | rest], blocked, before, walk, interpret, settle) do
+    case interpret.(goal, walk) do
+      :dead ->
+        :dead
+
+      {:waiting, names} ->
+        resume(rest, [{goal, names} | blocked], before, walk, interpret, settle)
+
+      %Expansion{goals: goals, walk: more} ->
+        resume(goals ++ rest, blocked, before, more, interpret, settle)
+
+      %Walk{} = more ->
+        resume(rest, blocked, before, more, interpret, settle)
     end
-  end
-
-  @doc "I suspend a goal until one of the named bindings changes."
-  @spec wait(t(), non_neg_integer(), [Expression.name()]) :: t()
-  def wait(schedule, k, names) do
-    waiting =
-      Enum.reduce(names, schedule.waiting, fn name, waiting ->
-        Map.update(waiting, name, MapSet.new([k]), &MapSet.put(&1, k))
-      end)
-
-    %{schedule | waiting: waiting, blocked: Map.put(schedule.blocked, k, names)}
-  end
-
-  @doc "I awaken dependent goals and remove their old subscriptions before they run again."
-  @spec wake(t(), [Expression.name()]) :: t()
-  def wake(schedule, names) do
-    {groups, waiting} =
-      Enum.map_reduce(names, schedule.waiting, &Map.pop(&2, &1, MapSet.new()))
-
-    awakened = Enum.reduce(groups, MapSet.new(), &MapSet.union/2)
-    {released, blocked} = Map.split(schedule.blocked, MapSet.to_list(awakened))
-    subscriptions = for {k, dependencies} <- released, name <- dependencies, do: {name, k}
-
-    waiting =
-      Enum.reduce(subscriptions, waiting, fn {name, k}, waiting ->
-        Map.update(waiting, name, MapSet.new(), &MapSet.delete(&1, k))
-      end)
-
-    %{
-      schedule
-      | waiting: waiting,
-        blocked: blocked,
-        awakened: MapSet.union(schedule.awakened, awakened)
-    }
   end
 end
