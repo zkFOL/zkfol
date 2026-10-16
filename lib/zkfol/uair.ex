@@ -321,6 +321,9 @@ defmodule Zkfol.Uair do
         {:conj, parts} ->
           {:conj, parts ++ pins(parts, aimed)}
 
+        {:disj, branches} ->
+          {:disj, Enum.map(branches, &pin_branch(&1, aimed))}
+
         node ->
           with {i, _address} = read <- Ast.read(node),
                leaf when is_map_key(rows, leaf) <- kind(read, len) do
@@ -332,6 +335,7 @@ defmodule Zkfol.Uair do
             _in_place -> node
           end
       end)
+      |> pin_branch(aimed)
 
     ties = for {{:tie, {i, c}}, row} <- rows, do: {i, c, row}
     {pred, witness, ties}
@@ -343,6 +347,14 @@ defmodule Zkfol.Uair do
   # Clamped so the row has a value; the pin then fails for that column, as it should.
   defp held({:aimed, address}, witness, x, len),
     do: address |> Semantics.column(witness, x) |> max(1) |> min(len)
+
+  @spec pin_branch(Ast.pred(), %{pos_integer() => Ast.address()}) :: Ast.pred()
+  defp pin_branch(branch, aimed) do
+    case pins([branch], aimed) do
+      [] -> branch
+      pins -> Ast.conj([branch | pins])
+    end
+  end
 
   @spec pins([Ast.pred()], %{pos_integer() => Ast.address()}) :: [Ast.pred()]
   defp pins(parts, aimed) do

@@ -187,6 +187,43 @@ defmodule Examples.EUair do
     uair
   end
 
+  @doc "A bare affine read stays tied to the address it names."
+  @spec bare_affine_read_keeps_its_address() :: Uair.t()
+  example bare_affine_read_keeps_its_address do
+    pred = Ast.eq(Ast.at(1, :x, -1, 5), 7)
+    {:ok, uair} = Uair.emit(pred, Interpretation.new([[7, 7, 7, 7]]), [{"opened", 1, 2}])
+    cube = Integer.pow(2, Uair.num_vars(uair))
+    source = [0, 0, 0 | List.duplicate(7, cube - 3)]
+    ones = List.duplicate(1, cube)
+    zeros = List.duplicate(0, cube)
+    sevens = List.duplicate(7, cube)
+
+    [%{value_row: value, row: pointer, bit_rows: [bit0, bit1, bit2], result_row: result}] =
+      uair.mode.reads
+
+    [{^pointer, [pointer_low | pointer_high]}, {slack, slack_limbs}] = uair.limbs
+    one = [pointer, bit0, bit1, pointer_low]
+    zero = [bit2, slack | pointer_high ++ slack_limbs]
+
+    columns =
+      for {cells, column} <- Enum.with_index(uair.columns) do
+        cond do
+          column in [0, value] -> source
+          column in one -> ones
+          column in zero -> zeros
+          column == result -> sevens
+          true -> cells
+        end
+      end
+
+    forged = %{uair | columns: columns}
+
+    refute Semantics.valid?(pred, Interpretation.new([[7, 0, 0, 0]]))
+    refute Uair.holds?(forged)
+    assert {:error, {:verifier_rejected, _}} = Prover.prove_uair(forged)
+    uair
+  end
+
   @doc "A full trace reserves padding: the backend's exempt final row is never an actual cell."
   @spec the_exempt_row_is_padding() :: Uair.t()
   example the_exempt_row_is_padding do
