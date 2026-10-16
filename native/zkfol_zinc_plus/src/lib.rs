@@ -26,7 +26,20 @@ use config::{
 };
 use runtime::{Op, Permuted, RuntimeUair, Selected, Spec, Tie, SPEC};
 
-const BACKEND: &str = "zinc-plus-66776a3";
+fn backend() -> &'static str {
+    static BACKEND: OnceLock<String> = OnceLock::new();
+
+    BACKEND.get_or_init(|| {
+        let revision = include_str!("../Cargo.lock")
+            .split("[[package]]")
+            .find(|package| package.contains("name = \"zinc-protocol\"\n"))
+            .and_then(|package| package.split_once('#'))
+            .and_then(|(_source, revision)| revision.get(..7))
+            .expect("zinc-protocol is locked to a git revision");
+
+        format!("zinc-plus-{revision}")
+    })
+}
 
 #[derive(rustler::NifMap)]
 struct PcsParams {
@@ -247,9 +260,9 @@ macro_rules! at_width {
 fn run(payload: Payload, statement: Statement, export: Option<String>) -> Result<Report, String> {
     let (num_vars, public_cols) = (statement.num_vars, statement.spec.num_public);
     let backend = match payload {
-        Payload::I64(_) => BACKEND.to_string(),
-        Payload::Big(_) => format!("{BACKEND}/int768"),
-        Payload::Huge(_) => format!("{BACKEND}/int7040"),
+        Payload::I64(_) => backend().to_string(),
+        Payload::Big(_) => format!("{}/int768", backend()),
+        Payload::Huge(_) => format!("{}/int7040", backend()),
     };
 
     let (proof, prove_ms) = at_width!(payload, num_vars, |Zt, Cell, trace, pp| {
@@ -341,7 +354,7 @@ fn pcs_params() -> PcsParams {
         rep_factor: REP_FACTOR,
         column_openings: NUM_COLUMN_OPENINGS,
         degree: D,
-        backend: BACKEND.to_string(),
+        backend: backend().to_string(),
     }
 }
 
