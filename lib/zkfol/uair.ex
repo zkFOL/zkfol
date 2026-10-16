@@ -63,7 +63,7 @@ defmodule Zkfol.Uair do
     field(:num_public, non_neg_integer())
     # Columns past `len` are padding.
     field(:len, pos_integer())
-    field(:claims, [{String.t(), non_neg_integer()}], default: [])
+    field(:claims, [Interpretation.claim()], default: [])
     field(:shifts, [shift()])
     field(:program, [op()])
     field(:degree, non_neg_integer())
@@ -132,7 +132,7 @@ defmodule Zkfol.Uair do
     len = Interpretation.len(witness)
     public = for {_name, i, _c} <- claims, uniq: true, do: i
 
-    with {:ok, values} <- claimed(claims, witness),
+    with :ok <- claimed(claims, witness),
          :ok <- models(pred, witness),
          pred = guarded(pred, len),
          {pred, witness} = sorted_copies({pred, witness}) |> bounded_expressions(),
@@ -143,24 +143,27 @@ defmodule Zkfol.Uair do
          {:ok, witness} <- filled(witness, tables, claims),
          {pred, witness, ties} = named_cells(stripped(pred), witness),
          pointed = Enum.flat_map(Ast.pointer_derefs(pred), &Tuple.to_list/1),
-         {pred, witness, public} = twinned(pred, witness, public, pointed ++ named),
+         {pred, witness, laid_public} = twinned(pred, witness, public, pointed ++ named),
          {:ok, pred, witness, lowering} <- Composed.lower(pred, witness, num_vars(len)),
          bounded = naturals(obligations) ++ Composed.bounded_rows(lowering),
          {pred, witness, limbs} = limbed(pred, witness, bounded),
          poly = polynomial(pred, len),
          unread = named ++ Composed.value_rows(lowering) ++ Enum.map(ties, &elem(&1, 0)),
-         rows = layout(poly, public, unread),
+         rows = layout(poly, laid_public, unread),
          cols = rows |> Enum.with_index() |> Map.new(),
          shifts = shifts(poly, cols),
          program = ops(poly, cols, shifts),
          columns = columns(witness, rows),
          :ok <- ZincPlus.fits(columns),
          :ok <- ZincPlus.constants_fit(program) do
+      public_rows = Map.new(Enum.zip(public, laid_public))
+      claims = for {name, row, x} <- claims, do: {name, Map.fetch!(public_rows, row), x}
+
       {:ok,
        %__MODULE__{
-         num_public: length(public),
+         num_public: length(laid_public),
          len: len,
-         claims: values,
+         claims: claims,
          shifts: shifts,
          program: program,
          degree: Ast.degree(pred),
@@ -473,15 +476,47 @@ defmodule Zkfol.Uair do
     )
   end
 
-  @spec claimed([Interpretation.claim()], Interpretation.t()) ::
+  @doc "I read the claims from the public columns."
+  @spec claimed(t()) ::
           {:ok, [{String.t(), non_neg_integer()}]} | {:error, Refusal.t()}
+  def claimed(%__MODULE__{claims: claims, rows: rows, num_public: num_public} = uair) do
+    cols = rows |> Enum.take(num_public) |> Enum.with_index() |> Map.new()
+    Refusal.map(claims, &claimed(uair, cols, &1))
+  end
+
+  @spec claimed(t(), %{row() => non_neg_integer()}, term()) ::
+          {:ok, {String.t(), non_neg_integer()}} | {:error, Refusal.t()}
+  defp claimed(
+         %__MODULE__{columns: columns, len: len},
+         cols,
+         {name, row, x}
+       )
+       when is_binary(name) and is_integer(row) and is_integer(x) and x >= 1 and x <= len do
+    with {:ok, column} <- Map.fetch(cols, row),
+         {:ok, values} <- Enum.fetch(columns, column),
+         {:ok, value} <- Enum.fetch(values, len - x) do
+      {:ok, {name, value}}
+    else
+      _outside -> {:error, {:claim_outside_witness, %{claim: name, row: row, column: x}}}
+    end
+  end
+
+  defp claimed(_uair, _cols, {name, row, x}),
+    do: {:error, {:claim_outside_witness, %{claim: name, row: row, column: x}}}
+
+  defp claimed(_uair, _cols, claim),
+    do: {:error, {:claim_outside_witness, %{claim: claim, row: nil, column: nil}}}
+
+  @spec claimed([Interpretation.claim()], Interpretation.t()) ::
+          :ok | {:error, Refusal.t()}
   defp claimed(claims, witness) do
-    Refusal.map(claims, fn {name, row, x} ->
-      case Interpretation.fetch(witness, row, x) do
-        {:ok, value} -> {:ok, {name, value}}
-        :error -> {:error, {:claim_outside_witness, %{claim: name, row: row, column: x}}}
+    Refusal.refute(
+      claims,
+      fn {_name, row, x} -> Interpretation.fetch(witness, row, x) == :error end,
+      fn {name, row, x} ->
+        {:claim_outside_witness, %{claim: name, row: row, column: x}}
       end
-    end)
+    )
   end
 
   ############################################################

@@ -250,7 +250,7 @@ defmodule Examples.EAl do
     assert Enum.at(uair.columns, 0) ==
              Enum.at(uair.columns, Enum.find_index(uair.rows, &(&1 == 1)))
 
-    assert uair.claims == [{"out", Interpretation.at(witness, 1, 2)}]
+    assert Uair.claimed(uair) == {:ok, [{"out", Interpretation.at(witness, 1, 2)}]}
     assert Enum.all?(uair.mode.reads, &(&1.value_row >= uair.num_public))
 
     {:ok, report, _id} = Prover.prove_uair(uair, name: :claimed_read)

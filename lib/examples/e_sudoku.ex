@@ -147,7 +147,9 @@ defmodule Examples.ESudoku do
         Statement.claims(statement)
       )
 
-    assert for({"solved.x", value} <- uair.claims, do: value) ==
+    assert {:ok, claims} = Uair.claimed(uair)
+
+    assert for({"solved.x", value} <- claims, do: value) ==
              Enum.concat(Enum.take(@solution, 2))
 
     {:ok, report, _id} = Prover.prove_uair(uair, name: :opened_cells)

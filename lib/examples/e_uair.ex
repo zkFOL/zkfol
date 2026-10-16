@@ -86,11 +86,27 @@ defmodule Examples.EUair do
       witness = Statement.witness(opened)
       expected = for {name, i, x} <- claims, do: {name, Interpretation.at(witness, i, x)}
       assert {:ok, uair} = Uair.emit(Statement.pred(opened), witness, claims)
-      assert uair.claims == expected
+      assert Uair.claimed(uair) == {:ok, expected}
       assert {:ok, report, _id} = Prover.prove_uair(uair)
       assert report.claims == expected
       report
     end
+  end
+
+  @doc "A report reads its values from the public columns Zinc+ verifies."
+  @spec reported_claims_come_from_public_columns() :: Prover.Report.t()
+  example reported_claims_come_from_public_columns do
+    statement = EUser.fibonacci()
+
+    {:ok, uair} =
+      Uair.emit(Statement.pred(statement), Statement.witness(statement), [{"fib", 1, 8}])
+
+    [{"fib", row, 8}] = uair.claims
+
+    retargeted = %{uair | claims: [{"fib", row, 7}]}
+    {:ok, report, _intent} = Prover.prove_uair(retargeted)
+    assert report.claims == [{"fib", 13}]
+    report
   end
 
   @doc "I take the plain route on purpose: the trace's own values need int768."
