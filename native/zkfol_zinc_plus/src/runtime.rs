@@ -1,13 +1,14 @@
 //! The interpreted UAIR: signature and constraint fed from Elixir terms.
 //!
 //! zinc-plus's Uair trait is static (no self), so the spec lives in a
-//! module global whose only writer is the prover thread: one statement
-//! owns it from dequeue until its verdict.
+//! module global whose only writer is the prover thread, or
+//! `zkfol_verify`: one statement owns it from dequeue until its verdict.
 
 use std::any::{Any, TypeId};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
+use serde::{Deserialize, Serialize};
 use zinc_poly::{mle::DenseMultilinearExtension, univariate::dense::DensePolynomial};
 use zinc_uair::{
     ideal::DegreeOneIdeal, ConstraintBuilder, LookupColumnSpec, LookupTableType, PointTie,
@@ -20,7 +21,7 @@ use crate::config::D;
 /// of its claims holds, and the cells of each claim as `(slot, row)`, the
 /// slot indexing `columns`. Every column of the group declares the same
 /// table, which is how the backend knows they are one group.
-#[derive(Clone, Debug, rustler::NifStruct)]
+#[derive(Clone, Debug, rustler::NifStruct, Serialize, Deserialize)]
 #[module = "Zkfol.ZincPlus.Selected"]
 pub struct Selected {
     pub columns: Vec<usize>,
@@ -30,7 +31,7 @@ pub struct Selected {
 
 /// One Permuted lookup group: the int columns it spans and its pairs of
 /// selections, each a `(slot, row)` list; each pair holds one multiset.
-#[derive(Clone, Debug, rustler::NifStruct)]
+#[derive(Clone, Debug, rustler::NifStruct, Serialize, Deserialize)]
 #[module = "Zkfol.ZincPlus.Permuted"]
 pub struct Permuted {
     pub columns: Vec<usize>,
@@ -39,14 +40,14 @@ pub struct Permuted {
 
 /// What a tied cell is fixed to: an int column the cell's private value
 /// fills at every row.
-#[derive(Clone, Debug, rustler::NifTaggedEnum)]
+#[derive(Clone, Debug, rustler::NifTaggedEnum, Serialize, Deserialize)]
 pub enum TieTarget {
     Broadcast(usize),
 }
 
 /// One cell the statement fixes: its int column, its cube row, and what
 /// fixes it. Nothing of a tie is committed and no lookup discharges it.
-#[derive(Clone, Debug, rustler::NifStruct)]
+#[derive(Clone, Debug, rustler::NifStruct, Serialize, Deserialize)]
 #[module = "Zkfol.ZincPlus.Tie"]
 pub struct Tie {
     pub column: usize,
@@ -55,7 +56,7 @@ pub struct Tie {
 }
 
 /// One postfix op of the constraint program.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Op {
     Up(usize),
     Down(usize),
@@ -64,7 +65,7 @@ pub enum Op {
     Mul,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Spec {
     pub num_cols: usize,
     pub num_public: usize,
