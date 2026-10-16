@@ -138,8 +138,11 @@ defmodule Zkfol.Refusal do
     do:
       {:out_of_range, "pointer row #{row} leaves the matrix: a composed read needs 1 <= A <= len"}
 
+  defp said({:claim_outside_witness, %{claim: claim, row: nil, column: nil}}),
+    do: {:out_of_range, "#{inspect(claim)} is not a claim on a witness cell"}
+
   defp said({:claim_outside_witness, %{claim: name, row: row, column: x}}),
-    do: {:out_of_range, "claim #{inspect(name)} names cell (#{row}, #{x}) outside the witness"}
+    do: {:out_of_range, "claim #{inspect(name)} cannot open cell (#{row}, #{x}) in the witness"}
 
   defp said({:beyond_the_rows, %{relation: name}}),
     do: {:out_of_range, "a claim on #{name} reaches beyond the rows it stands on"}

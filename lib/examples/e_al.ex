@@ -188,7 +188,7 @@ defmodule Examples.EAl do
     for pointer <- pointers do
       slack = Enum.map(Enum.at(uair.columns, pointer), &(&1 - 1))
 
-      assert Enum.any?(uair.word_lookups, fn {row, 32, 8} ->
+      assert Enum.any?(uair.limbs, fn {row, _limbs} ->
                Enum.at(uair.columns, row) == slack
              end)
 
@@ -250,7 +250,7 @@ defmodule Examples.EAl do
     assert Enum.at(uair.columns, 0) ==
              Enum.at(uair.columns, Enum.find_index(uair.rows, &(&1 == 1)))
 
-    assert uair.claims == [{"out", Interpretation.at(witness, 1, 2)}]
+    assert Uair.claimed(uair) == {:ok, [{"out", Interpretation.at(witness, 1, 2)}]}
     assert Enum.all?(uair.mode.reads, &(&1.value_row >= uair.num_public))
 
     {:ok, report, _id} = Prover.prove_uair(uair, name: :claimed_read)

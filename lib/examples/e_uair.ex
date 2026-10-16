@@ -86,11 +86,27 @@ defmodule Examples.EUair do
       witness = Statement.witness(opened)
       expected = for {name, i, x} <- claims, do: {name, Interpretation.at(witness, i, x)}
       assert {:ok, uair} = Uair.emit(Statement.pred(opened), witness, claims)
-      assert uair.claims == expected
+      assert Uair.claimed(uair) == {:ok, expected}
       assert {:ok, report, _id} = Prover.prove_uair(uair)
       assert report.claims == expected
       report
     end
+  end
+
+  @doc "A report reads its values from the public columns Zinc+ verifies."
+  @spec reported_claims_come_from_public_columns() :: Prover.Report.t()
+  example reported_claims_come_from_public_columns do
+    statement = EUser.fibonacci()
+
+    {:ok, uair} =
+      Uair.emit(Statement.pred(statement), Statement.witness(statement), [{"fib", 1, 8}])
+
+    [{"fib", row, 8}] = uair.claims
+
+    retargeted = %{uair | claims: [{"fib", row, 7}]}
+    {:ok, report, _intent} = Prover.prove_uair(retargeted)
+    assert report.claims == [{"fib", 13}]
+    report
   end
 
   @doc "I take the plain route on purpose: the trace's own values need int768."
@@ -121,21 +137,91 @@ defmodule Examples.EUair do
     assert short.degree == long.degree
     assert long.degree < ZincPlus.pcs_params().degree
     [%{row: pointer, bit_rows: [bit | _]}] = long.mode.reads
-    [{^pointer, 32, 8}, {slack, 32, 8}] = long.word_lookups
+    [{^pointer, _limbs}, {slack, [low | _]}] = long.limbs
 
     for {row, value} <- [{pointer, 0}, {pointer, long.len + 1}, {slack, 2 ** 32}, {bit, 2}] do
       forged = List.update_at(long.columns, row, &List.replace_at(&1, 0, value))
       assert {:error, _refusal} = Prover.prove_uair(%{long | columns: forged})
     end
 
-    # The final cube row is exempt from the polynomial, but still belongs to Word.
-    forged = List.update_at(long.columns, slack, &List.replace_at(&1, -1, 2 ** 32))
+    # The final cube row is exempt from the polynomial, but the spelling stated a row back
+    # holds it there, so a slack forged past 32 bits must carry its low limb with it.
+    forged =
+      for {cells, row} <- Enum.with_index(long.columns) do
+        case row do
+          ^slack ->
+            List.replace_at(cells, -1, 2 ** 32)
+
+          ^low ->
+            List.update_at(cells, -1, &(&1 + 2 ** 32 - List.last(Enum.at(long.columns, slack))))
+
+          _other ->
+            cells
+        end
+      end
+
     assert {:error, {:prover_failed, _}} = Prover.prove_uair(%{long | columns: forged})
 
     assert {:ok, %Prover.Report{}, _id} =
-             Prover.prove_uair(%{long | columns: forged, word_lookups: [{pointer, 32, 8}]})
+             Prover.prove_uair(%{long | columns: forged, limbs: [hd(long.limbs)]})
 
     long
+  end
+
+  @doc "A branch reading a column back holds only where that column is in the trace."
+  @spec reads_back_inside_the_trace() :: Uair.t()
+  example reads_back_inside_the_trace do
+    counted =
+      Ast.disj([
+        Ast.conj([Ast.eq(Ast.x(), 1), Ast.eq(Ast.cell(1), 0)]),
+        Ast.eq(Ast.cell(1), Ast.add(Ast.at(1, :x, 1, -1), 1))
+      ])
+
+    {:ok, uair} = Uair.emit(counted, Interpretation.new([[0, 1, 2, 3, 4]]))
+    assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair)
+
+    # Counting from 96 at x = 1 would read 95 off the padding.
+    [_count | rest] = uair.columns
+    forged = %{uair | columns: [Enum.to_list(100..93//-1) | rest]}
+    assert {:error, {:verifier_rejected, _}} = Prover.prove_uair(forged)
+    uair
+  end
+
+  @doc "A bare affine read stays tied to the address it names."
+  @spec bare_affine_read_keeps_its_address() :: Uair.t()
+  example bare_affine_read_keeps_its_address do
+    pred = Ast.eq(Ast.at(1, :x, -1, 5), 7)
+    {:ok, uair} = Uair.emit(pred, Interpretation.new([[7, 7, 7, 7]]), [{"opened", 1, 2}])
+    cube = Integer.pow(2, Uair.num_vars(uair))
+    source = [0, 0, 0 | List.duplicate(7, cube - 3)]
+    ones = List.duplicate(1, cube)
+    zeros = List.duplicate(0, cube)
+    sevens = List.duplicate(7, cube)
+
+    [%{value_row: value, row: pointer, bit_rows: [bit0, bit1, bit2], result_row: result}] =
+      uair.mode.reads
+
+    [{^pointer, [pointer_low | pointer_high]}, {slack, slack_limbs}] = uair.limbs
+    one = [pointer, bit0, bit1, pointer_low]
+    zero = [bit2, slack | pointer_high ++ slack_limbs]
+
+    columns =
+      for {cells, column} <- Enum.with_index(uair.columns) do
+        cond do
+          column in [0, value] -> source
+          column in one -> ones
+          column in zero -> zeros
+          column == result -> sevens
+          true -> cells
+        end
+      end
+
+    forged = %{uair | columns: columns}
+
+    refute Semantics.valid?(pred, Interpretation.new([[7, 0, 0, 0]]))
+    refute Uair.holds?(forged)
+    assert {:error, {:verifier_rejected, _}} = Prover.prove_uair(forged)
+    uair
   end
 
   @doc "A full trace reserves padding: the backend's exempt final row is never an actual cell."
@@ -161,7 +247,7 @@ defmodule Examples.EUair do
     statement = EUser.registers_mod(6)
     {:ok, uair} = Uair.emit(Statement.pred(statement), Statement.witness(statement))
 
-    assert {5, 32, 8} in uair.word_lookups
+    assert List.keymember?(uair.limbs, 5, 0)
     assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair, name: :slacked_trace)
     uair
   end
@@ -170,17 +256,22 @@ defmodule Examples.EUair do
   I am the pair of verdicts the range declarations decide between. A remainder above
   its modulus keeps `e = m*q + r` true when the quotient falls by one, so the whole
   polynomial program holds of this trace; the slack and the quotient go negative for
-  it, and the door carries them to the backend as built. Declared, the Word tables
-  refuse it. Dropped from the two columns the forgery drove below zero, the same
-  trace proves a remainder of 7932 out of a modulus of 7919.
+  it, and the door carries them to the backend as built. Each moved cell carries its low
+  limb, so every spelling holds too. Declared, the Word tables refuse the limbs.
+  Dropped from the three columns the forgery moved, the same trace proves a remainder of
+  7932 out of a modulus of 7919.
   """
   @spec forged_remainder_verdicts() :: {Refusal.t(), Prover.Report.t()}
   example forged_remainder_verdicts do
     uair = slacked_trace()
     modulus = 7919
 
+    low = Map.new(uair.limbs, fn {column, [low | _]} -> {column, low} end)
+
     at = fn columns, column, move ->
-      List.update_at(columns, column, &List.update_at(&1, 0, move))
+      Enum.reduce([column, low[column]], columns, fn c, acc ->
+        List.update_at(acc, c, &List.update_at(&1, 0, move))
+      end)
     end
 
     columns =
@@ -192,10 +283,7 @@ defmodule Examples.EUair do
     forged = %{uair | columns: columns}
     assert hd(Enum.at(columns, 0)) >= modulus
 
-    negative =
-      for {cells, column} <- Enum.with_index(columns), Enum.any?(cells, &(&1 < 0)), do: column
-
-    dropped = %{forged | word_lookups: Enum.reject(uair.word_lookups, &(elem(&1, 0) in negative))}
+    dropped = %{forged | limbs: Enum.reject(uair.limbs, &(elem(&1, 0) in [0, 2, 5]))}
 
     assert {:error, {:prover_failed, %{said: said}} = refused} =
              Prover.prove_uair(forged, name: :forged_remainder, unchecked: true)
@@ -226,7 +314,7 @@ defmodule Examples.EUair do
       {:ok, uair} = Uair.emit(pred, Statement.witness(statement), Statement.claims(statement))
 
       cells = &Enum.at(uair.columns, Enum.find_index(uair.rows, fn row -> row == &1 end))
-      declared = for {column, _width, _chunk} <- uair.word_lookups, do: Enum.at(uair.rows, column)
+      declared = for {column, _limbs} <- uair.limbs, do: Enum.at(uair.rows, column)
       claimed = Enum.take(uair.rows, uair.num_public)
       obliged = naturals(pred)
       carried = MapSet.new(declared, cells)
@@ -282,13 +370,13 @@ defmodule Examples.EUair do
     statement = EUser.open_tail()
     {:ok, uair} = Uair.emit(Statement.pred(statement), Statement.witness(statement))
 
-    assert uair.word_lookups == []
+    assert uair.limbs == []
     assert uair.mode == %Uair.Plain{}
     assert [%{selections: [_one]}] = uair.selected_lookups
 
     assert uair.point_ties == []
     assert Uair.num_cols(uair) == 5
-    assert length(uair.program) == 91
+    assert length(uair.program) == 99
     assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair, name: :named_cells)
     uair
   end

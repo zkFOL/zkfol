@@ -18,8 +18,8 @@ defmodule Zkfol.ZincPlus do
   @big_bound Integer.pow(2, 766)
   @huge_bound Integer.pow(2, 7038)
 
-  @typedoc "A word lookup: {column, table width, chunk width}."
-  @type lookup :: {non_neg_integer(), pos_integer(), pos_integer()}
+  @typedoc "A word lookup: {column, table width}."
+  @type lookup :: {non_neg_integer(), pos_integer()}
 
   typedstruct module: Selected, enforce: true do
     @typedoc """
@@ -76,6 +76,7 @@ defmodule Zkfol.ZincPlus do
     field(:point_ties, [Zkfol.ZincPlus.Tie.t()], default: [])
     field(:reads, [{non_neg_integer(), [non_neg_integer()], non_neg_integer()}], default: [])
     field(:num_vars, pos_integer())
+    field(:export, Path.t() | nil, default: nil)
   end
 
   @doc "I queue an interpreted UAIR on the prover thread."
@@ -100,6 +101,9 @@ defmodule Zkfol.ZincPlus do
   @doc """
   I queue the UAIR with the prover fitting its magnitude and return an id.
 
+  `export: prefix` writes the statement to `prefix.json` and the proof to `prefix.proof`, for
+  `priv/native/zkfol_verify`. Zinc+ is not zero-knowledge: the proof reveals part of the witness.
+
   `unchecked: true` ships the payload as built, past `fits/1`. It is the door the
   negative tests need: a forgery the circuit must refuse cannot be watched being
   refused while Elixir refuses it first. No ordinary caller passes it.
@@ -118,12 +122,13 @@ defmodule Zkfol.ZincPlus do
           shifts: uair.shifts,
           program: Enum.map(uair.program, &wire/1),
           cells: cells(uair, values),
-          word_lookups: uair.word_lookups,
+          word_lookups: Uair.word_lookups(uair),
           selected_lookups: uair.selected_lookups,
           permuted_lookups: uair.permuted_lookups,
           point_ties: uair.point_ties,
           reads: reads,
-          num_vars: Uair.num_vars(uair)
+          num_vars: Uair.num_vars(uair),
+          export: Keyword.get(opts, :export)
         })
 
       with {:error, said} <- queued, do: {:error, Refusal.from_backend(said)}

@@ -55,26 +55,32 @@ defmodule Zkfol.Uair do
   @typedoc "A column the program reads back, and by how many rows."
   @type shift :: {non_neg_integer(), pos_integer()}
 
-  # The backend needs width / chunk to be a power of two.
-  @word_width 32
-  @word_chunk 8
+  # A bounded row is spelled in limbs the backend's Word table ranges over.
+  @limb_width 8
+  @limbs 4
 
   typedstruct enforce: true do
     field(:num_public, non_neg_integer())
     # Columns past `len` are padding.
     field(:len, pos_integer())
-    field(:claims, [{String.t(), non_neg_integer()}], default: [])
+    field(:claims, [Interpretation.claim()], default: [])
     field(:shifts, [shift()])
     field(:program, [op()])
     field(:degree, non_neg_integer())
     field(:columns, [[integer()]])
     field(:mode, mode(), default: %Plain{})
     field(:rows, [row()], default: [])
-    field(:word_lookups, [ZincPlus.lookup()], default: [])
+    # A bounded column and the columns of its limbs.
+    field(:limbs, [{non_neg_integer(), [non_neg_integer()]}], default: [])
     field(:selected_lookups, [ZincPlus.Selected.t()], default: [])
     field(:permuted_lookups, [ZincPlus.Permuted.t()], default: [])
     field(:point_ties, [ZincPlus.Tie.t()], default: [])
   end
+
+  @doc "I am the Word lookups the limbs owe: one per limb column, over the limb width."
+  @spec word_lookups(t()) :: [ZincPlus.lookup()]
+  def word_lookups(%__MODULE__{limbs: limbs}),
+    do: for({_column, columns} <- limbs, column <- columns, do: {column, @limb_width})
 
   @doc "I am the committed column count: the columns themselves say it."
   @spec num_cols(t()) :: non_neg_integer()
@@ -126,8 +132,9 @@ defmodule Zkfol.Uair do
     len = Interpretation.len(witness)
     public = for {_name, i, _c} <- claims, uniq: true, do: i
 
-    with {:ok, values} <- claimed(claims, witness),
+    with :ok <- claimed(claims, witness),
          :ok <- models(pred, witness),
+         pred = guarded(pred, len),
          {pred, witness} = sorted_copies({pred, witness}) |> bounded_expressions(),
          obligations = obligations(pred),
          named = Enum.flat_map(obligations, &Ast.reads/1),
@@ -136,32 +143,34 @@ defmodule Zkfol.Uair do
          {:ok, witness} <- filled(witness, tables, claims),
          {pred, witness, ties} = named_cells(stripped(pred), witness),
          pointed = Enum.flat_map(Ast.pointer_derefs(pred), &Tuple.to_list/1),
-         {pred, witness, public} = twinned(pred, witness, public, pointed ++ named),
+         {pred, witness, laid_public} = twinned(pred, witness, public, pointed ++ named),
          {:ok, pred, witness, lowering} <- Composed.lower(pred, witness, num_vars(len)),
+         bounded = naturals(obligations) ++ Composed.bounded_rows(lowering),
+         {pred, witness, limbs} = limbed(pred, witness, bounded),
          poly = polynomial(pred, len),
          unread = named ++ Composed.value_rows(lowering) ++ Enum.map(ties, &elem(&1, 0)),
-         rows = layout(poly, public, unread),
+         rows = layout(poly, laid_public, unread),
          cols = rows |> Enum.with_index() |> Map.new(),
          shifts = shifts(poly, cols),
          program = ops(poly, cols, shifts),
          columns = columns(witness, rows),
          :ok <- ZincPlus.fits(columns),
          :ok <- ZincPlus.constants_fit(program) do
+      public_rows = Map.new(Enum.zip(public, laid_public))
+      claims = for {name, row, x} <- claims, do: {name, Map.fetch!(public_rows, row), x}
+
       {:ok,
        %__MODULE__{
-         num_public: length(public),
+         num_public: length(laid_public),
          len: len,
-         claims: values,
+         claims: claims,
          shifts: shifts,
          program: program,
          degree: Ast.degree(pred),
          columns: columns,
          mode: Composed.emitted(lowering, cols),
          rows: rows,
-         word_lookups:
-           for i <- naturals(obligations) ++ Composed.bounded_rows(lowering) do
-             {cols[i], @word_width, @word_chunk}
-           end,
+         limbs: for({row, rows} <- limbs, do: {cols[row], Enum.map(rows, &cols[&1])}),
          selected_lookups: selected(tables, cols, len),
          permuted_lookups: permuted(pairs, cols, len),
          point_ties:
@@ -246,6 +255,41 @@ defmodule Zkfol.Uair do
     {pred, witness}
   end
 
+  # The Word table ranges over a limb, so a bounded row is spelled in limbs. The program
+  # skips the cube's last row, so the spelling is stated a row back too, which holds it
+  # there as well.
+  @spec limbed(Ast.pred(), Interpretation.t(), [pos_integer()]) ::
+          {Ast.pred(), Interpretation.t(), [{pos_integer(), [pos_integer()]}]}
+  defp limbed(pred, witness, bounded) do
+    bounded = Enum.uniq(bounded)
+    leaves = for row <- bounded, k <- 0..(@limbs - 1), do: {row, k}
+    {witness, rows} = rowed(witness, leaves, &limb(&1, witness, &2))
+    limbs = for row <- bounded, do: {row, Enum.map(0..(@limbs - 1), &rows[{row, &1}])}
+
+    spellings =
+      for {row, limb_rows} <- limbs, back <- [0, -1] do
+        weighted =
+          limb_rows
+          |> Enum.with_index()
+          |> Enum.map(fn {l, k} -> Ast.mul(Ast.at(l, :x, 1, back), 1 <<< (@limb_width * k)) end)
+
+        Ast.eq(Ast.at(row, :x, 1, back), Enum.reduce(weighted, &Ast.add(&2, &1)))
+      end
+
+    pred =
+      pred
+      |> Ast.branches()
+      |> Enum.map(&Ast.conj(Ast.conjuncts(&1) ++ spellings))
+      |> Ast.disj()
+
+    {pred, witness, limbs}
+  end
+
+  @spec limb({pos_integer(), non_neg_integer()}, Interpretation.t(), pos_integer()) ::
+          integer()
+  defp limb({row, k}, witness, x),
+    do: Interpretation.at(witness, row, x) >>> (@limb_width * k) &&& (1 <<< @limb_width) - 1
+
   @spec natural_value(Ast.term_t(), Interpretation.t(), pos_integer()) :: non_neg_integer()
   defp natural_value(term, witness, x) do
     with v when is_integer(v) and v >= 0 <- Semantics.eval(term, witness, x),
@@ -277,6 +321,9 @@ defmodule Zkfol.Uair do
         {:conj, parts} ->
           {:conj, parts ++ pins(parts, aimed)}
 
+        {:disj, branches} ->
+          {:disj, Enum.map(branches, &pin_branch(&1, aimed))}
+
         node ->
           with {i, _address} = read <- Ast.read(node),
                leaf when is_map_key(rows, leaf) <- kind(read, len) do
@@ -288,6 +335,7 @@ defmodule Zkfol.Uair do
             _in_place -> node
           end
       end)
+      |> pin_branch(aimed)
 
     ties = for {{:tie, {i, c}}, row} <- rows, do: {i, c, row}
     {pred, witness, ties}
@@ -300,6 +348,14 @@ defmodule Zkfol.Uair do
   defp held({:aimed, address}, witness, x, len),
     do: address |> Semantics.column(witness, x) |> max(1) |> min(len)
 
+  @spec pin_branch(Ast.pred(), %{pos_integer() => Ast.address()}) :: Ast.pred()
+  defp pin_branch(branch, aimed) do
+    case pins([branch], aimed) do
+      [] -> branch
+      pins -> Ast.conj([branch | pins])
+    end
+  end
+
   @spec pins([Ast.pred()], %{pos_integer() => Ast.address()}) :: [Ast.pred()]
   defp pins(parts, aimed) do
     for part <- parts,
@@ -309,6 +365,51 @@ defmodule Zkfol.Uair do
         uniq: true,
         do: Ast.eq(Ast.cell(row), Ast.naming(aimed[row]))
   end
+
+  # A branch reading b columns back is undefined at x <= b, where the backend would read
+  # the padding, so it holds only where `past/2` says that column is in the trace.
+  @spec guarded(Ast.pred(), pos_integer()) :: Ast.pred()
+  defp guarded(pred, len) do
+    pred
+    |> Ast.postwalk(fn
+      {:disj, branches} -> {:disj, Enum.map(branches, &guard(&1, len))}
+      node -> node
+    end)
+    |> guard(len)
+  end
+
+  @spec guard(Ast.pred(), pos_integer()) :: Ast.pred()
+  defp guard(branch, len) do
+    b = back(branch)
+
+    if b < least(branch),
+      do: branch,
+      else: Ast.conj(Ast.conjuncts(branch) ++ [Ast.eq(past(b, len), 1)])
+  end
+
+  # The least column a branch's own conjuncts let it hold at.
+  @spec least(Ast.pred()) :: pos_integer()
+  defp least(branch) do
+    branch
+    |> Ast.conjuncts()
+    |> Enum.map(fn
+      {:natural, {:add, :x, k}} -> -k
+      {:eq, :x, c} when is_integer(c) -> c
+      _other -> 1
+    end)
+    |> Enum.max()
+  end
+
+  # A disjunction's branches guard their own reads, unless it sits in a term, where its
+  # value counts and not only whether it holds.
+  @spec back(Ast.pred() | Ast.term_t()) :: non_neg_integer()
+  defp back({:disj, _branches}), do: 0
+  defp back({:reify, phi}), do: Ast.reduce(phi, 0, &max(behind(&1), &2))
+  defp back(node), do: Enum.reduce(Ast.children(node), behind(node), &max(back(&1), &2))
+
+  @spec behind(Ast.pred() | Ast.term_t()) :: non_neg_integer()
+  defp behind({:cell, _i, {:at, :x, 1, add}}) when add < 0, do: -add
+  defp behind(_node), do: 0
 
   # Lookups and pointers range over private columns only, so a claimed row they touch
   # hands its claim to a copy.
@@ -387,15 +488,47 @@ defmodule Zkfol.Uair do
     )
   end
 
-  @spec claimed([Interpretation.claim()], Interpretation.t()) ::
+  @doc "I read the claims from the public columns."
+  @spec claimed(t()) ::
           {:ok, [{String.t(), non_neg_integer()}]} | {:error, Refusal.t()}
+  def claimed(%__MODULE__{claims: claims, rows: rows, num_public: num_public} = uair) do
+    cols = rows |> Enum.take(num_public) |> Enum.with_index() |> Map.new()
+    Refusal.map(claims, &claimed(uair, cols, &1))
+  end
+
+  @spec claimed(t(), %{row() => non_neg_integer()}, term()) ::
+          {:ok, {String.t(), non_neg_integer()}} | {:error, Refusal.t()}
+  defp claimed(
+         %__MODULE__{columns: columns, len: len},
+         cols,
+         {name, row, x}
+       )
+       when is_binary(name) and is_integer(row) and is_integer(x) and x >= 1 and x <= len do
+    with {:ok, column} <- Map.fetch(cols, row),
+         {:ok, values} <- Enum.fetch(columns, column),
+         {:ok, value} <- Enum.fetch(values, len - x) do
+      {:ok, {name, value}}
+    else
+      _outside -> {:error, {:claim_outside_witness, %{claim: name, row: row, column: x}}}
+    end
+  end
+
+  defp claimed(_uair, _cols, {name, row, x}),
+    do: {:error, {:claim_outside_witness, %{claim: name, row: row, column: x}}}
+
+  defp claimed(_uair, _cols, claim),
+    do: {:error, {:claim_outside_witness, %{claim: claim, row: nil, column: nil}}}
+
+  @spec claimed([Interpretation.claim()], Interpretation.t()) ::
+          :ok | {:error, Refusal.t()}
   defp claimed(claims, witness) do
-    Refusal.map(claims, fn {name, row, x} ->
-      case Interpretation.fetch(witness, row, x) do
-        {:ok, value} -> {:ok, {name, value}}
-        :error -> {:error, {:claim_outside_witness, %{claim: name, row: row, column: x}}}
+    Refusal.refute(
+      claims,
+      fn {_name, row, x} -> Interpretation.fetch(witness, row, x) == :error end,
+      fn {name, row, x} ->
+        {:claim_outside_witness, %{claim: name, row: row, column: x}}
       end
-    end)
+    )
   end
 
   ############################################################
@@ -502,7 +635,7 @@ defmodule Zkfol.Uair do
   ############################################################
 
   # The backend has no column index, so X is a committed column, and the pins are what
-  # keep it equal to the index.
+  # keep it equal to the index and `ones` equal to 1.
   @spec polynomial(Ast.pred(), pos_integer()) :: Ast.ep()
   defp polynomial(pred, len) do
     poly =
@@ -514,22 +647,20 @@ defmodule Zkfol.Uair do
         node -> node
       end)
 
-    if :x in Ast.reads(poly),
-      do: Ast.add(poly, Ast.arithmetize(pinned(len, num_vars(len)))),
+    if Enum.any?([:x, :ones], &(&1 in Ast.reads(poly))),
+      do: Ast.add(poly, Ast.arithmetize(pinned(len))),
       else: poly
   end
 
   # With one column the region is empty, so X is pinned to 1 directly.
-  @spec pinned(pos_integer(), pos_integer()) :: Ast.pred()
-  defp pinned(1, _num_vars), do: Ast.eq(Ast.cell(:x), 1)
+  @spec pinned(pos_integer()) :: Ast.pred()
+  defp pinned(1), do: Ast.eq(Ast.cell(:x), 1)
 
-  # `ones` is 1 everywhere including the padding, so `ones` shifted by the padding width
-  # is 1 exactly inside the trace. There X steps by one; outside X is 1.
-  defp pinned(len, num_vars) do
+  # Where the column before is in the trace X steps by one; elsewhere X is 1.
+  defp pinned(len) do
     x = Ast.cell(:x)
     ones = Ast.cell(:ones)
-    head = (1 <<< num_vars) - len + 1
-    region = Ast.at(:ones, :x, 1, -head)
+    region = past(1, len)
     stepped = Ast.sub(Ast.sub(x, Ast.at(:x, :x, 1, -1)), 1)
 
     Ast.conj([
@@ -539,6 +670,12 @@ defmodule Zkfol.Uair do
       Ast.eq(Ast.mul(Ast.sub(1, region), Ast.sub(x, 1)), 0)
     ])
   end
+
+  # `ones` is 1 throughout the cube and reads zero past its end, so read far enough back it
+  # is 1 exactly where column x - b is in the trace. Past a trace of b columns, it is nowhere.
+  @spec past(pos_integer(), pos_integer()) :: Ast.term_t()
+  defp past(b, len) when b >= len, do: 0
+  defp past(b, len), do: Ast.at(:ones, :x, 1, len - b - (1 <<< num_vars(len)))
 
   # Claimed rows first, then every row read or named, sorted, then X and ones.
   @spec layout(Ast.ep(), [pos_integer()], [pos_integer()]) :: [row()]

@@ -224,11 +224,10 @@ defmodule Zkfol.Unrolling do
     end
   end
 
-  # A node is read through the heap and a list behind a pointer through the pointer.
+  # A node or a pair is read through the heap.
   @spec walkable?(Place.t()) :: boolean()
   defp walkable?({:node, _}), do: false
   defp walkable?({:pair, _, _}), do: false
-  defp walkable?({:held, _, _, _}), do: false
   defp walkable?(_place), do: true
 
   # The first call that moves a parameter.

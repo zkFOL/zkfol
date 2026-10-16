@@ -152,8 +152,7 @@ defmodule Zkfol.Alloc do
                 %Site{address: {:at, {:cell, ref}, _m, _a}} <- calls,
                 do: ref
 
-          held = for %Slot{allocation: {:bank, _, {:at, {:cell, ref}, _, _}}} <- slots, do: ref
-          nodes ++ pointers ++ held
+          nodes ++ pointers
 
         %Zkfol.Nodes{refs: refs} ->
           for {Zkfol.Nodes, field} = ref <- refs, field not in [:tag, :value], do: ref
@@ -257,12 +256,10 @@ defmodule Zkfol.Alloc do
     Bank.rows(name, depth)
   end
 
-  # A bank held behind a pointer spends the parameter's own row for the pointer.
   defp spent(%Member{slots: slots}) do
     Enum.flat_map(slots, fn
       %Slot{allocation: {kind, ref}} when kind in [:cell, :node] -> [ref]
       %Slot{allocation: {:rel, _name, rows}} -> rows
-      %Slot{allocation: {:bank, _name, {:at, {:cell, ref}, _m, _a}}} -> [ref]
       _slot -> []
     end)
   end

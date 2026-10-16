@@ -29,7 +29,7 @@ defmodule Examples.EFace do
 
     assert feed.len == 8
     assert hd(feed.columns) == Enum.reverse(Enum.map(1..8, &EUser.fib/1)) ++ List.duplicate(1, 8)
-    assert feed.kinds == [:scheduled, :scheduled, :ranged, :scheduled, :scheduled]
+    assert feed.kinds == [:scheduled, :scheduled, :ranged] ++ List.duplicate(:scheduled, 6)
     assert Enum.all?(feed.columns, &(length(&1) == 16))
     assert feed.num_vars == 4
 

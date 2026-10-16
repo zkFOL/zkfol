@@ -127,7 +127,9 @@ defmodule Examples.EFol do
 
     {:ok, uair} = Uair.emit(Statement.pred(statement), Statement.witness(statement), claims)
 
-    assert for({"columns_apart.x", value} <- uair.claims, do: value) ==
+    assert {:ok, claims} = Uair.claimed(uair)
+
+    assert for({"columns_apart.x", value} <- claims, do: value) ==
              hd(hd(ESudoku.act()))
 
     [%{columns: columns, selections: selections}] = uair.selected_lookups

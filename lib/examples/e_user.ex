@@ -202,6 +202,14 @@ defmodule Examples.EUser do
     Zkfol.FOL.each(rs, small_rows())
   end
 
+  defrel line("hello, world")
+  defrel line("hello; world")
+
+  defrel clean_line(s) do
+    line(s)
+    absent(?;, s)
+  end
+
   @spec fibonacci(pos_integer()) :: Statement.t()
   example fibonacci(n \\ 8) do
     {:ok, statement, _trace} = Pipeline.run(plain(), %Statement{rels: [fib()], args: [n]})
@@ -229,7 +237,7 @@ defmodule Examples.EUser do
     statement
   end
 
-  @doc "A guard's slack past 32 bits is a natural all the same; only the Word lookup refuses it."
+  @doc "A guard's slack past 32 bits is a natural all the same; only its limbs refuse it."
   @spec a_slack_cannot_outgrow_its_word() :: Refusal.t()
   example a_slack_cannot_outgrow_its_word do
     wide =
@@ -251,13 +259,13 @@ defmodule Examples.EUser do
     assert Enum.min(cells) >= 0
     assert Enum.max(cells) < 2 ** 32
 
-    assert {:error, {:prover_failed, %{said: said}} = refused} =
+    assert {:error, {:verifier_rejected, %{said: said}} = refused} =
              Prover.prove(Statement.pred(statement), witness,
                claims: Statement.claims(statement),
                name: :wide_slack
              )
 
-    assert said =~ "Lookup"
+    assert said =~ "AssertZero"
     refused
   end
 
@@ -466,6 +474,16 @@ defmodule Examples.EUser do
     assert {:ok, phi} = Phi.lower(spiral, [spiral, doubled_fun()])
     assert Enum.take(Zkfol.stream([spiral, doubled_fun()], [[], :_]), 1) == [[[], 0]]
     phi
+  end
+
+  @doc "A string is the bracket of its codepoints: only the line without `;` derives."
+  @spec a_string_without_a_character() :: Statement.t()
+  example a_string_without_a_character do
+    ran = Zkfol.compile(clean_line(), args: [:_])
+
+    assert Enum.to_list(Zkfol.stream(clean_line(), [:_])) == [[~c"hello, world"]]
+    assert %Prover.Report{} = Log.report(Log.snapshot(), ran)
+    Log.Run.final_stage(ran)
   end
 
   @spec plain() :: Pipeline.t()

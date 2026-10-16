@@ -127,7 +127,7 @@ defmodule Examples.ESudoku do
 
     {:ok, uair} = Uair.emit(Statement.pred(statement), Statement.witness(statement))
 
-    assert uair.word_lookups == []
+    assert uair.limbs == []
     [%{values: values, selections: selections}] = uair.selected_lookups
     assert values == Enum.to_list(1..9)
     assert length(selections) == 27
@@ -147,7 +147,9 @@ defmodule Examples.ESudoku do
         Statement.claims(statement)
       )
 
-    assert for({"solved.x", value} <- uair.claims, do: value) ==
+    assert {:ok, claims} = Uair.claimed(uair)
+
+    assert for({"solved.x", value} <- claims, do: value) ==
              Enum.concat(Enum.take(@solution, 2))
 
     {:ok, report, _id} = Prover.prove_uair(uair, name: :opened_cells)

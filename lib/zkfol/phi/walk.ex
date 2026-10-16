@@ -233,10 +233,9 @@ defmodule Zkfol.Phi.Walk do
 
   @doc "I bind a parameter to the bank it is laid in and record the element shape of the bank's rows."
   @spec bank(t(), Ast.row_ref(), Place.t(), Shape.t()) :: t()
-  def bank(walk = %__MODULE__{}, ref, laid, shape) when Place.is_laid(laid) do
-    row = {bank, 1} = elem(laid, 1)
+  def bank(walk = %__MODULE__{}, ref, laid = {:along, row = {bank, 1}, head}, shape) do
     {:list, _extent, element} = shape
-    walk = bind(walk, ref, laid, {:bank, bank, Place.address(laid)})
+    walk = bind(walk, ref, laid, {:bank, bank, head})
     if element == :unknown, do: walk, else: refine(walk, %{row => element})
   end
 
