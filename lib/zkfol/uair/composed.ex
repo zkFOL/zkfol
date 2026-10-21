@@ -134,28 +134,21 @@ defmodule Zkfol.Uair.Composed do
     end)
   end
 
+  # Pointer bounds hold for every alternative, so conjoin them once.
   @spec rewrite(Ast.pred(), [Ast.pred()], %{row() => pos_integer()}) ::
           Ast.pred()
   defp rewrite(pred, constraints, results) do
     pred
-    |> Ast.branches()
-    |> Enum.map(fn branch ->
-      parts =
-        branch
-        |> Ast.postwalk(fn node ->
-          case Ast.read(node) do
-            {i, {:at, {:cell, j}, 1, 0}} when is_map_key(results, {i, j}) ->
-              Ast.cell(results[{i, j}])
+    |> Ast.postwalk(fn node ->
+      case Ast.read(node) do
+        {i, {:at, {:cell, j}, 1, 0}} when is_map_key(results, {i, j}) ->
+          Ast.cell(results[{i, j}])
 
-            _other ->
-              node
-          end
-        end)
-        |> Ast.conjuncts()
-
-      Ast.conj(parts ++ constraints)
+        _other ->
+          node
+      end
     end)
-    |> Ast.disj()
+    |> then(&Ast.conj([&1 | constraints]))
   end
 
   @spec value(row(), Interpretation.t(), pos_integer()) :: integer()
