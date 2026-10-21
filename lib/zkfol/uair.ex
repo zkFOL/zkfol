@@ -145,10 +145,11 @@ defmodule Zkfol.Uair do
          pointed = Enum.flat_map(Ast.pointer_derefs(pred), &Tuple.to_list/1),
          {pred, witness, laid_public} = twinned(pred, witness, public, pointed ++ named),
          {:ok, pred, witness, lowering} <- Composed.lower(pred, witness, num_vars(len)),
-         bounded = naturals(obligations) ++ Composed.bounded_rows(lowering),
+         bounded = naturals(obligations) ++ lowering.bounded,
          {pred, witness, limbs} = limbed(pred, witness, bounded),
          poly = polynomial(pred, len),
-         unread = named ++ Composed.value_rows(lowering) ++ Enum.map(ties, &elem(&1, 0)),
+         unread =
+           named ++ Enum.map(lowering.reads, & &1.value_row) ++ Enum.map(ties, &elem(&1, 0)),
          rows = layout(poly, laid_public, unread),
          cols = rows |> Enum.with_index() |> Map.new(),
          shifts = shifts(poly, cols),
@@ -185,10 +186,11 @@ defmodule Zkfol.Uair do
   #                         The rows                         #
   ############################################################
 
+  @doc "I append the rows computed for each leaf and return their witness row numbers."
   @spec rowed(Interpretation.t(), [leaf], (leaf, pos_integer() -> integer())) ::
           {Interpretation.t(), %{leaf => pos_integer()}}
         when leaf: var
-  defp rowed(witness, leaves, value) do
+  def rowed(witness, leaves, value) do
     columns = 1..Interpretation.len(witness)
     rows = Enum.map(leaves, fn leaf -> Enum.map(columns, &value.(leaf, &1)) end)
 
