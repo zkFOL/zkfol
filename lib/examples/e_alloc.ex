@@ -2,7 +2,7 @@ defmodule Examples.EAlloc do
   @moduledoc "I am the linker's evidence: named predicates resolve to the regions' rows."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 

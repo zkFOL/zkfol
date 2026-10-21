@@ -5,6 +5,7 @@ defmodule Zkfol.Prims do
   """
 
   use Zkfol.Lang
+  import Zkfol.FOL
 
   @phi {Zkfol.Ast, :natural}
   @al quote(do: x >= 0)

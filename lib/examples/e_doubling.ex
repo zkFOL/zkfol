@@ -35,7 +35,7 @@ defmodule Examples.EDoubling do
   @doc "I am fibonacci reduced at every step: the source that says what it reduces by."
   @spec fibm_rel(pos_integer()) :: Rel.t()
   def fibm_rel(m \\ @mod) do
-    Zkfol.Lang.rel :fibm do
+    Zkfol.Lang.rel do
       fibm(1, 1)
       fibm(2, 1)
 
@@ -100,7 +100,7 @@ defmodule Examples.EDoubling do
   @spec constrained_recurrences() :: [Statement.t()]
   example constrained_recurrences do
     guarded =
-      Zkfol.Lang.rel :guarded do
+      Zkfol.Lang.rel do
         guarded(1, 1)
         guarded(2, 1)
 
@@ -113,7 +113,7 @@ defmodule Examples.EDoubling do
       end
 
     constrained =
-      Zkfol.Lang.rel :constrained do
+      Zkfol.Lang.rel do
         constrained(1, 1)
         constrained(2, 1)
 
@@ -127,7 +127,7 @@ defmodule Examples.EDoubling do
       end
 
     shared =
-      Zkfol.Lang.rel :shared do
+      Zkfol.Lang.rel do
         shared(1, 1)
         shared(2, 1)
 
@@ -140,7 +140,7 @@ defmodule Examples.EDoubling do
       end
 
     difference =
-      Zkfol.Lang.rel :difference do
+      Zkfol.Lang.rel do
         difference(1, 0)
         difference(2, 2)
 
@@ -165,7 +165,7 @@ defmodule Examples.EDoubling do
   @spec recurrence_meanings() :: [Statement.t()]
   example recurrence_meanings do
     fib = EUser.fib()
-    zero = Zkfol.Lang.rel(:natural, do: natural(0))
+    zero = Zkfol.Lang.rel(do: natural(0))
     denied = quote(do: 1 > 2)
 
     for rels <- [
