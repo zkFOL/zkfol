@@ -11,6 +11,7 @@ defmodule Zkfol.Facts do
   use TypedStruct
 
   alias Zkfol.Lang.Rel
+  alias Zkfol.Prims
   alias Zkfol.Refusal
 
   typedstruct enforce: true do
@@ -21,16 +22,20 @@ defmodule Zkfol.Facts do
 
   @doc "I read the recurrence `rel` is, or refuse."
   @spec of(Rel.t()) :: {:ok, t()} | {:error, Refusal.t()}
-  def of(%Rel{name: f, clauses: [{[a, x1], []}, {[b, x2], []}, {[{:var, n}, {:var, v}], body}]})
+  def of(%Rel{
+        name: f,
+        clauses: [{[a, x1], []}, {[b, x2], []}, {[{:var, n}, {:var, v}], body}]
+      })
       when is_integer(a) and is_integer(x1) and is_integer(x2) and b == a + 1 do
     {guards, goals} = Enum.split_with(body, &guard?(&1, n))
 
     with true <- Enum.all?(guards, &above?(&1, b)),
          [
-           {:call, ^f, [{:add, {:var, ^n}, -1}, {:var, u}]},
-           {:call, ^f, [{:add, {:var, ^n}, -2}, {:var, w}]},
+           {:call, f1, [{:add, {:var, ^n}, -1}, {:var, u}]},
+           {:call, f2, [{:add, {:var, ^n}, -2}, {:var, w}]},
            definition
          ] <- Enum.sort_by(goals, &elem(&1, 0)),
+         true <- Rel.name(f1) == f and Rel.name(f2) == f,
          {rhs, modulus} <- defined(definition, v),
          %{^u => p, ^w => q} = combination when map_size(combination) == 2 <- linear(rhs),
          4 <- length(Enum.uniq([n, v, u, w])) do
@@ -43,19 +48,19 @@ defmodule Zkfol.Facts do
   def of(%Rel{name: f}), do: {:error, {:not_a_recurrence, %{relation: f}}}
 
   @spec guard?(term(), atom()) :: boolean()
-  defp guard?({:call, op, [{:var, n}, _bound, _slack]}, n), do: op in [:gt, :gte]
+  defp guard?({:call, op, [{:var, n}, _bound, _slack]}, n), do: op in [&Prims.gt/0, &Prims.gte/0]
   defp guard?(_goal, _n), do: false
 
   # The step applies exactly above the base, spelled either way.
   @spec above?(term(), integer()) :: boolean()
-  defp above?({:call, :gt, [_n, bound, _slack]}, last), do: bound == last
-  defp above?({:call, :gte, [_n, bound, _slack]}, last), do: bound == last + 1
+  defp above?({:call, op, [_n, bound, _slack]}, last),
+    do: bound == last + if(op == (&Prims.gte/0), do: 1, else: 0)
 
   @spec defined(term(), atom()) :: {term(), pos_integer() | nil} | nil
   defp defined({:eq, {:var, v}, rhs}, v), do: {rhs, nil}
 
-  defp defined({:call, :mod, [rhs, m, {:var, v}, {:var, _q}]}, v) when is_integer(m) and m > 0,
-    do: {rhs, m}
+  defp defined({:call, op, [rhs, m, {:var, v}, {:var, _q}]}, v) when is_integer(m) and m > 0,
+    do: if(op == (&Prims.mod/0), do: {rhs, m})
 
   defp defined(_goal, _v), do: nil
 
