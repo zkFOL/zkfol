@@ -1,7 +1,7 @@
 defmodule Zkfol.Phi.Value do
   @moduledoc """
-  I am the operations the unifier needs on a value: a place, a list of them, a handed
-  count, a passed relation, or nothing yet.
+  I am the operations the unifier needs on a value: a place, a list of them,
+  a passed relation, or nothing yet.
 
   ### Public API
 
@@ -30,13 +30,12 @@ defmodule Zkfol.Phi.Value do
   def elements(view) when Place.is_laid(view), do: Place.elements(view)
   def elements({:pair, h, t}), do: [elements(h) | elements(t)]
   def elements([h | t]), do: [elements(h) | elements(t)]
-  def elements({:count, _q, form}), do: form
   def elements(form), do: form
 
   @doc """
-  I return the value a callee is handed for a caller's value: cells of the caller's
-  column, data, counts and lists along the trace as they are; a held list or a pair as a
-  node the callee equates with its parameter.
+  I retain literal lists, numbers and relations. Scalar accesses leave the callee's
+  parameter unresolved. Views addressed from X keep their bank; views addressed through
+  pointers and pairs pass as nodes.
   """
   @spec handed(t()) :: t()
   def handed(node = {:node, _id}), do: node
@@ -44,14 +43,14 @@ defmodule Zkfol.Phi.Value do
   def handed(view = %Place.View{}), do: Place.node_of(view)
   def handed(pair = {:pair, _, _}), do: Place.node_of(pair)
   def handed(form) when is_list(form) or is_integer(form) or form == :fresh, do: form
-  def handed({tag, _a, _b} = form) when tag in [:count, :rel], do: form
+  def handed({:rel, _name, _fixed} = form), do: form
   def handed(_scalar), do: :fresh
 
   @doc "I express a callee value at its call address in the caller."
   @spec frame(t(), frame()) :: t()
+  # Recursive ancestors can be called before their parameter storage is completed.
   def frame({:fresh, ref}, frame), do: frame({:cell, ref}, frame)
   def frame({:node, id}, frame), do: {:node, frame(id, frame)}
-  def frame({:count, _q, form}, frame), do: frame(form, frame)
   def frame({:rel, p, fixed}, frame), do: {:rel, p, Enum.map(fixed, &frame(&1, frame))}
   def frame(form, _frame) when is_integer(form) or form in [:fresh, []], do: form
 
@@ -73,7 +72,6 @@ defmodule Zkfol.Phi.Value do
   @doc "I read a scalar value, refusing structure where arithmetic requires a number."
   @spec scalar(t()) :: scalar()
   def scalar({:node, id}), do: Place.read(:value, id)
-  def scalar({:count, _q, form}), do: form
   def scalar({:fresh, ref}), do: throw({:waiting, [{:scalar, ref}]})
 
   def scalar(form)
