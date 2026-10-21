@@ -43,7 +43,6 @@ defmodule Zkfol.Phi.Place do
           | [t()]
           | {:pair, t(), t()}
           | {:rel, atom(), [t()]}
-          | {:count, integer(), Ast.term_t()}
           | {:fresh, Ast.row_ref()}
           | :fresh
 
@@ -54,7 +53,7 @@ defmodule Zkfol.Phi.Place do
   @spec scalar?(t()) :: boolean()
   def scalar?(value) when is_integer(value) or value == :x, do: true
 
-  def scalar?(value) when is_tuple(value) and elem(value, 0) in [:cell, :count, :add, :mul],
+  def scalar?(value) when is_tuple(value) and elem(value, 0) in [:cell, :add, :mul],
     do: true
 
   def scalar?(_value), do: false
@@ -101,7 +100,6 @@ defmodule Zkfol.Phi.Place do
   @spec affine(t()) :: {integer(), integer()} | nil
   def affine(:x), do: {1, 0}
   def affine(q) when is_integer(q), do: {0, q}
-  def affine({:count, _q, cell}), do: affine(cell)
 
   def affine({:add, a, b}) do
     case {affine(a), affine(b)} do
@@ -130,15 +128,14 @@ defmodule Zkfol.Phi.Place do
   def consed(head, tail), do: {:pair, head, tail}
 
   @doc """
-  I place an incoming parameter and state which storage it owns. Structures and private
-  counts own cells; a passed relation owns its captures; other accesses are borrowed.
+  I place an incoming parameter and state which storage it owns. Structures and supplied
+  numbers own cells; a passed relation owns its captures; other accesses are borrowed.
   A fresh parameter has no binding until matching establishes its representation.
   """
   @spec plain(t(), Ast.row_ref(), boolean()) :: Binding.t() | nil
   def plain(_form, ref, true), do: output([], ref)
   def plain(:fresh, _ref, false), do: nil
   def plain({:fresh, _unplaced}, _ref, false), do: nil
-  def plain({:count, q, _cell}, ref, false), do: output(q, ref)
 
   def plain({:rel, p, fixed}, {name, {:param, sym}}, false) do
     rows = for k <- 1..length(fixed)//1, do: {name, {:own, {:"#{sym}.#{k}", []}}}
@@ -159,9 +156,6 @@ defmodule Zkfol.Phi.Place do
 
   @doc "I give a resolved output its own cell or term identity; relation values share their captures."
   @spec output(t(), Ast.row_ref()) :: Binding.t()
-  def output(value, ref) when is_integer(value),
-    do: %Binding{value: {:count, value, Ast.cell(ref)}, allocation: {:cell, ref}}
-
   def output(value, ref)
       when is_list(value) or is_laid(value) or
              (is_tuple(value) and elem(value, 0) in [:node, :pair]),

@@ -149,15 +149,6 @@ defmodule Zkfol.Phi do
   @spec compiled(Rel.t(), %{atom() => Rel.t()}, [term()]) ::
           {:ok, Ast.pred(), Alloc.t(), Walk.t()} | {:error, Refusal.t()}
   defp compiled(root = %Rel{}, scope, args) do
-    # Handed scalars remain private; only explicitly declared dimensions choose banks.
-    handed =
-      for k <- 0..(root.arity - 1)//1 do
-        case Enum.at(args, k) do
-          q when is_integer(q) -> {:count, q, nil}
-          _open -> :fresh
-        end
-      end
-
     ctx = %{
       scope: scope,
       depth: 0,
@@ -170,7 +161,7 @@ defmodule Zkfol.Phi do
       body: []
     }
 
-    {name, _binds, walk} = compile_member(root, handed, ctx, args)
+    {name, _binds, walk} = compile_member(root, List.duplicate(:fresh, root.arity), ctx, args)
 
     pred =
       Ast.conj(
@@ -210,7 +201,7 @@ defmodule Zkfol.Phi do
     initial =
       if traversal,
         do: Zkfol.Phi.Traversal.parameters(traversal, handed, refs),
-        else: parameters(rel, handed, refs)
+        else: parameters(rel, handed, refs, inputs)
 
     member = %Member{
       name: name,
@@ -282,14 +273,17 @@ defmodule Zkfol.Phi do
     end
   end
 
-  @spec parameters(Rel.t(), [value()], [Ast.row_ref()]) ::
+  @spec parameters(Rel.t(), [value()], [Ast.row_ref()], [term()]) ::
           Walk.t()
-  defp parameters(rel, handed, refs) do
+  defp parameters(rel, handed, refs, inputs) do
     declarations =
       for {{ref, form}, k} <- Enum.with_index(Enum.zip(refs, handed)) do
         list? =
           Enum.any?(rel.clauses, fn {head, _body} -> Lang.Term.sequence?(Enum.at(head, k)) end)
 
+        # Supplied numbers choose owned cells here; matching never sees their values.
+        input = Enum.at(inputs, k)
+        form = if is_integer(input), do: input, else: form
         Walk.bind(%Walk{}, ref, Place.plain(form, ref, list?))
       end
 
@@ -330,6 +324,7 @@ defmodule Zkfol.Phi do
 
   # An unused access contributes no storage requirement. A heap requirement dominates
   # a scalar cell. Otherwise keep the incoming access or the first live owner.
+  # No declaration means the completed member leaves that argument unconstrained.
   @spec shared_parameters([Ast.row_ref()], [Walk.t()]) :: [{Ast.row_ref(), Binding.t()}]
   defp shared_parameters(refs, walks) do
     for ref <- refs do
@@ -341,7 +336,7 @@ defmodule Zkfol.Phi do
 
       {ref,
        %Binding{
-         value: Map.get(declaration.env, ref, {:fresh, ref}),
+         value: Map.get(declaration.env, ref, :fresh),
          allocation: Map.get(declaration.parameters, ref, :none)
        }}
     end
@@ -506,7 +501,7 @@ defmodule Zkfol.Phi do
         {:scalar, ref}, acc ->
           if Map.has_key?(acc.env, ref),
             do: acc,
-            else: Walk.bind(acc, ref, %Binding{value: Ast.cell(ref), allocation: :none})
+            else: %{acc | env: Map.put(acc.env, ref, Ast.cell(ref))}
 
         {:array, name}, acc ->
           %{acc | env: Map.put(acc.env, name, {:fresh, {owner, {:own, {name, []}}}})}
@@ -930,9 +925,6 @@ defmodule Zkfol.Phi do
 
   defp unify(q, {:node, id}, walk) when is_integer(q),
     do: Walk.constrain(walk, [Ast.eq(Place.read(:value, id), q)])
-
-  defp unify(q, {:count, _held, form}, walk) when is_integer(q),
-    do: Walk.constrain(walk, [Ast.eq(form, q)])
 
   defp unify(q, form, walk)
        when is_integer(q) and (form == :x or elem(form, 0) in [:cell, :add, :mul]),
