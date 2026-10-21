@@ -2,7 +2,7 @@ defmodule Examples.EQuery do
   @moduledoc "I am the query door open: answers stepped one at a time."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -30,12 +30,11 @@ defmodule Examples.EQuery do
     assert Query.taken(query) == [[2, 2]]
     Query.close(query)
 
-    stray =
-      Zkfol.Lang.rel :stray do
-        stray(x) do
-          nowhere(x)
-        end
-      end
+    stray = %Zkfol.Lang.Rel{
+      name: :stray,
+      arity: 1,
+      clauses: [{[{:var, :x}], [{:call, :nowhere, [{:var, :x}]}]}]
+    }
 
     {:error, reason} = Zkfol.eval(stray, [1], [])
     assert {:relation_not_in_scope, %{relation: :nowhere}} = reason

@@ -57,7 +57,7 @@ defmodule Zkfol.Pipeline do
 
   @spec program([Zkfol.Lang.Rel.t()]) :: [Zkfol.Lang.Rel.t()]
   defp program([root | _rest] = rels) do
-    case Zkfol.Lang.reached(root, rels) do
+    case Zkfol.Program.reached(root, rels) do
       {:ok, reached} -> reached
       {:error, _absent} -> rels
     end
