@@ -1,0 +1,28 @@
+name: Exported proof integrity regression
+on:
+  push:
+    branches:
+      - test/verifier-rejects-corrupt-proof
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  exported-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.18.4'
+          otp-version: '27.3'
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+      - name: Run example suite with native prover and verifier
+        env:
+          ZKFOL_PROVE: '1'
+        run: mix test test/examples_test.exs

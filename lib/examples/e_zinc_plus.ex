@@ -36,4 +36,37 @@ defmodule Examples.EZincPlus do
     assert {_said, 1} = verify.(edited)
     prefix
   end
+
+  @doc "A truncated exported proof must fail verification while the original remains valid."
+  @spec truncated_proof_is_rejected() :: :ok
+  example truncated_proof_is_rejected do
+    prefix =
+      Path.join(System.tmp_dir!(), "zkfol-proof-integrity-#{System.unique_integer([:positive])}")
+
+    original = prefix <> ".proof"
+    truncated = prefix <> ".truncated.proof"
+    statement = prefix <> ".json"
+    binary = Application.app_dir(:zkfol, "priv/native/zkfol_verify")
+
+    try do
+      ran = Zkfol.compile(%Statement{rels: [EUser.fib()], args: [8]}, public: [:r], export: prefix)
+      assert %Prover.Report{} = Log.report(Log.snapshot(), ran)
+
+      assert {_output, 0} = System.cmd(binary, [statement, original], stderr_to_stdout: true)
+
+      bytes = File.read!(original)
+      assert byte_size(bytes) > 1
+      :ok = File.write(truncated, binary_part(bytes, 0, byte_size(bytes) - 1))
+
+      assert {_output, status} =
+               System.cmd(binary, [statement, truncated], stderr_to_stdout: true)
+
+      assert status != 0
+      assert {_output, 0} = System.cmd(binary, [statement, original], stderr_to_stdout: true)
+      :ok
+    after
+      for path <- [original, truncated, statement], do: File.rm(path)
+    end
+  end
+
 end
