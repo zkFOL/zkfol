@@ -229,12 +229,12 @@ defmodule Zkfol.Phi do
         traversal: traversal
     }
 
-    {clauses, initial} = member_clauses(rel, member, refs, initial, ctx, inputs)
+    {clauses, parameters} = member_clauses(rel, member, refs, initial, ctx, inputs)
 
     live = for %Clause{compiled: walk = %Walk{}} <- clauses, do: walk
     present = Ast.eq({:cell, {:in, name}}, 1)
     branches = for clause <- live, do: Ast.conj([present | Enum.sort_by(clause.eqs, &inspect/1)])
-    {binds, slots, banks} = parameter_slots(refs, initial, live)
+    {binds, slots, banks} = parameter_slots(parameters)
 
     sites =
       Map.new(Enum.with_index(clauses), fn
@@ -296,39 +296,54 @@ defmodule Zkfol.Phi do
     Enum.reduce(declarations, %Walk{}, &Walk.merge/2)
   end
 
-  # A parameter has one representation across alternatives. If any clause needs a
-  # term identity, compile all its alternatives with that identity; scalars are terms too.
-  # Each retry fixes a parameter to shared term storage.
+  # Join the live clauses' storage requirements before choosing the member's interface.
+  # A heap identity can hold scalars too. A retry gives every alternative that same
+  # representation; each retry permanently fixes at least one parameter to heap storage.
   @spec member_clauses(Rel.t(), Member.t(), [Ast.row_ref()], Walk.t(), ctx(), [term()]) ::
-          {[Clause.t()], Walk.t()}
+          {[Clause.t()], [{Ast.row_ref(), Binding.t()}]}
   defp member_clauses(rel, member, refs, initial, ctx, inputs) do
     binds = Enum.map(refs, &Map.get(initial.env, &1, {:fresh, &1}))
     within = %{ctx | ancestors: [{member, binds} | ctx.ancestors]}
     clauses = compile_clauses(rel, member, binds, initial, within)
     clauses = complete_parameters(clauses, refs, initial, inputs)
+    live = for %Clause{compiled: walk = %Walk{}} <- clauses, do: walk
+    parameters = shared_parameters(refs, [initial | live])
 
     shared =
-      for ref <- refs,
-          allocations =
-            for(
-              %Clause{compiled: %Walk{parameters: parameters}} <- clauses,
-              do: Map.get(parameters, ref, :none)
-            ),
-          {:node, ref} in allocations,
-          Enum.any?(allocations, &(&1 != {:node, ref})),
-          do: ref
+      for {ref, binding = %Binding{allocation: {:node, ref}}} <- parameters,
+          Enum.any?(live, &(Map.get(&1.parameters, ref, :none) != binding.allocation)),
+          do: {ref, binding}
 
     case shared do
       [] ->
-        {clauses, initial}
+        {clauses, parameters}
 
-      refs_to_share ->
+      bindings ->
         initial =
-          Enum.reduce(refs_to_share, initial, fn ref, walk ->
-            Walk.bind(walk, ref, %Binding{value: {:node, Ast.cell(ref)}, allocation: {:node, ref}})
+          Enum.reduce(bindings, initial, fn {ref, binding}, walk ->
+            Walk.bind(walk, ref, binding)
           end)
 
         member_clauses(rel, member, refs, initial, ctx, inputs)
+    end
+  end
+
+  # An unused access contributes no storage requirement. A heap requirement dominates
+  # a scalar cell. Otherwise keep the incoming access or the first live owner.
+  @spec shared_parameters([Ast.row_ref()], [Walk.t()]) :: [{Ast.row_ref(), Binding.t()}]
+  defp shared_parameters(refs, walks) do
+    for ref <- refs do
+      owners = Enum.filter(walks, &(Map.get(&1.parameters, ref, :none) != :none))
+
+      declaration =
+        Enum.find(owners, &(&1.parameters[ref] == {:node, ref})) || List.first(owners) ||
+          Enum.find(walks, hd(walks), &is_map_key(&1.parameters, ref))
+
+      {ref,
+       %Binding{
+         value: Map.get(declaration.env, ref, {:fresh, ref}),
+         allocation: Map.get(declaration.parameters, ref, :none)
+       }}
     end
   end
 
@@ -382,16 +397,13 @@ defmodule Zkfol.Phi do
   defp parameter_reads(values) when is_list(values), do: Enum.flat_map(values, &parameter_reads/1)
   defp parameter_reads(_literal), do: []
 
-  # Supplied accesses stay as declared; new outputs use their completed bindings.
-  @spec parameter_slots([Ast.row_ref()], Walk.t(), [Walk.t()]) ::
+  # Slots consume the agreed interface; they make no further placement decisions.
+  @spec parameter_slots([{Ast.row_ref(), Binding.t()}]) ::
           {[value()], [Slot.t()], [Bank.t()]}
-  defp parameter_slots(refs, initial, clauses) do
+  defp parameter_slots(bindings) do
     parameters =
-      for {ref = {_name, {:param, sym}}, k} <- Enum.with_index(refs) do
-        declaration = Enum.find([initial | clauses], initial, &is_map_key(&1.parameters, ref))
-        allocation = Map.get(declaration.parameters, ref, :none)
-        access = Map.get(declaration.env, ref, {:fresh, ref})
-
+      for {{{_name, {:param, sym}}, %Binding{value: access, allocation: allocation}}, k} <-
+            Enum.with_index(bindings) do
         {access,
          %Slot{name: sym, allocation: allocation, source: %Source{binding: {:argument, k}}}}
       end
@@ -871,49 +883,41 @@ defmodule Zkfol.Phi do
   defp unify(_pattern, :fresh, walk), do: walk
   defp unify(:fresh, _value, walk), do: walk
 
+  # Follow either side's existing binding before applying any matching rule.
+  # Below this boundary every variable or parameter reference is unresolved.
+  defp unify({tag, name}, value, walk = %Walk{env: env})
+       when tag in [:var, :fresh] and is_map_key(env, name),
+       do: unify(Walk.fetch(walk, name), value, walk)
+
+  defp unify(value, {tag, name}, walk = %Walk{env: env})
+       when tag in [:var, :fresh] and is_map_key(env, name),
+       do: unify(value, Walk.fetch(walk, name), walk)
+
   defp unify({:var, v}, value, walk = %Walk{env: env}) do
-    case env do
-      %{^v => _held} ->
-        unify(Expression.substitute({:var, v}, walk), value, walk)
+    value = Expression.substitute(value, walk)
 
-      _fresh ->
-        value = Expression.substitute(value, walk)
+    if v in Lang.Term.names(value),
+      do: throw({:refused, {:unbound_variable, %{variable: v}}})
 
-        cond do
-          value == {:var, v} -> walk
-          v in Lang.Term.names(value) -> throw({:refused, {:unbound_variable, %{variable: v}}})
-          true -> %{walk | env: Map.put(env, v, value)}
-        end
-    end
+    %{walk | env: Map.put(env, v, value)}
   end
 
   defp unify(value, variable = {:var, _name}, walk), do: unify(variable, value, walk)
 
   # Two unresolved parameters become one until a value binds either.
-  defp unify(a = {:fresh, ref}, b = {:fresh, other}, walk = %Walk{env: env}) do
-    cond do
-      is_map_key(env, ref) -> unify(Walk.fetch(walk, ref), b, walk)
-      is_map_key(env, other) -> unify(a, Walk.fetch(walk, other), walk)
-      true -> %{walk | env: Map.put(env, other, a)}
-    end
-  end
+  defp unify(a = {:fresh, _ref}, {:fresh, other}, walk),
+    do: %{walk | env: Map.put(walk.env, other, a)}
 
   # The parameter takes storage for the value, then is matched against it.
-  defp unify({:fresh, ref}, value, walk = %Walk{env: env}) do
-    case env do
-      %{^ref => _bound} ->
-        unify(Walk.fetch(walk, ref), value, walk)
+  defp unify({:fresh, ref}, value, walk) do
+    value = if value == nil, do: [], else: value
 
-      _unbound ->
-        value = if value == nil, do: [], else: value
+    if is_list(value) or Place.is_laid(value) or
+         (is_tuple(value) and elem(value, 0) in [:cons, :pair]),
+       do: throw({:waiting, [{:storage, ref}]})
 
-        if is_list(value) or Place.is_laid(value) or
-             (is_tuple(value) and elem(value, 0) in [:cons, :pair]),
-           do: throw({:waiting, [{:storage, ref}]})
-
-        walk = Walk.bind(walk, ref, Place.output(value, ref))
-        unify(Walk.fetch(walk, ref), value, walk)
-    end
+    walk = Walk.bind(walk, ref, Place.output(value, ref))
+    unify(Walk.fetch(walk, ref), value, walk)
   end
 
   defp unify(pattern, {:fresh, _ref} = fresh, walk), do: unify(fresh, pattern, walk)
@@ -963,7 +967,6 @@ defmodule Zkfol.Phi do
   # Two lists in banks: the same one, or one counted against the other's elements.
   defp unify(a, b, walk) when Place.is_laid(a) and Place.is_laid(b) do
     cond do
-      a == b -> walk
       Place.count(b) -> unify(a, Place.elements(b), walk)
       Place.count(a) -> unify(b, Place.elements(a), walk)
       true -> throw({:refused, {:unliftable_term, %{term: b}}})

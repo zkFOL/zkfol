@@ -119,6 +119,38 @@ defmodule Examples.EAlloc do
     end
   end
 
+  defrel sometimes_read(0, x, z) do
+    z = 0 * x
+  end
+
+  defrel sometimes_read(1, x, z) do
+    z = x + 1
+  end
+
+  @doc "An erased read in one alternative cannot hide a cell read by another."
+  @spec alternatives_share_live_storage() :: [Prover.Report.t()]
+  example alternatives_share_live_storage do
+    root = sometimes_read()
+
+    for clauses <- [root.clauses, Enum.reverse(root.clauses)],
+        args <- [[0, 3, 0], [1, 3, 4]] do
+      root = %{root | clauses: clauses}
+      {:ok, pred, alloc} = Phi.compile(root)
+      assert Alloc.width(alloc) == 4
+      {:ok, derivation} = Al.derived(root, args)
+      lay = Lay.of(derivation, alloc)
+      pred = Alloc.link(pred, alloc)
+      witness = Lay.witness(lay)
+      {:ok, claims} = Lay.claims(lay, [1, 2, 3])
+      assert {:ok, report, _id} = Prover.prove(pred, witness, claims: claims)
+      [_, _, result] = Alloc.root(alloc).slots
+      [ref] = Alloc.slot_rows(alloc, result)
+      forged = Interpretation.put(witness, Alloc.row(alloc, ref), 1, List.last(args) + 1)
+      refute Zkfol.Semantics.valid?(pred, forged)
+      report
+    end
+  end
+
   @doc "An impossible clause owns no callee or value rows, wherever the contradiction occurs."
   @spec impossible_clauses_allocate_nothing() :: [Alloc.t()]
   example impossible_clauses_allocate_nothing do
