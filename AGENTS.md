@@ -25,7 +25,7 @@ them; do not rely on paraphrase (they evolve):
   The NIF build is slow; avoid needless recompiles.
 - `mix test` — runs the examples as tests (`test/examples_test.exs` wires each
   `Examples.E<Module>` in via `use ExExample.ExUnit`).
-- `mix dialyzer` — type check (config in `.dialyzer_ignore.exs`).
+- `mix dialyzer` — type check.
 - `mix format` — 98-char lines; run before finalizing.
 - One-off: `MIX_ENV=test timeout 60 mix run -e 'Examples.EFacts.factorial()'` (never
   `--no-halt`; dev's mnesia store belongs to the live GT node). The test env lands
