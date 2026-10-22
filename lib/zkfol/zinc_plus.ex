@@ -60,29 +60,6 @@ defmodule Zkfol.ZincPlus do
           | {:big, [[[non_neg_integer()]]]}
           | {:huge, [[[non_neg_integer()]]]}
 
-  typedstruct module: Payload, enforce: true do
-    @typedoc "One queued UAIR, as the NIF decodes it."
-    field(:num_cols, pos_integer())
-    field(:num_public, non_neg_integer())
-    field(:shifts, [{non_neg_integer(), pos_integer()}])
-    field(:program, [{atom(), integer()}])
-    field(:cells, Zkfol.ZincPlus.cells())
-    # A column declared here proves only if every cell is under 2^width.
-    field(:word_lookups, [Zkfol.ZincPlus.lookup()], default: [])
-    # A group proves only if every selection holds the multiset.
-    field(:selected_lookups, [Zkfol.ZincPlus.Selected.t()], default: [])
-    # A group proves only if each pair of selections holds one multiset.
-    field(:permuted_lookups, [Zkfol.ZincPlus.Permuted.t()], default: [])
-    field(:point_ties, [Zkfol.ZincPlus.Tie.t()], default: [])
-    field(:reads, [{non_neg_integer(), [non_neg_integer()], non_neg_integer()}], default: [])
-    field(:num_vars, pos_integer())
-    field(:export, Path.t() | nil, default: nil)
-  end
-
-  @doc "I queue an interpreted UAIR on the prover thread."
-  @spec prove_fol(Payload.t()) :: {:ok, pos_integer()} | {:error, String.t()}
-  def prove_fol(payload), do: Zkfol.ZincPlus.Native.prove_fol(payload)
-
   @typedoc """
   The pinned code's parameters: a column encodes to `rep_factor` times its cells, an
   opening reveals `column_openings` positions, `degree` is the protocol's degree bound.
@@ -116,20 +93,14 @@ defmodule Zkfol.ZincPlus do
     with :ok <- unclaimed(reads, uair.num_public),
          :ok <- if(Keyword.get(opts, :unchecked, false), do: :ok, else: fits(uair.columns)) do
       queued =
-        prove_fol(%Payload{
-          num_cols: Uair.num_cols(uair),
-          num_public: uair.num_public,
-          shifts: uair.shifts,
-          program: Enum.map(uair.program, &wire/1),
-          cells: cells(uair, values),
-          word_lookups: Uair.word_lookups(uair),
-          selected_lookups: uair.selected_lookups,
-          permuted_lookups: uair.permuted_lookups,
-          point_ties: uair.point_ties,
-          reads: reads,
-          num_vars: Uair.num_vars(uair),
-          export: Keyword.get(opts, :export)
-        })
+        Zkfol.ZincPlus.Native.prove_fol(
+          uair,
+          cells(uair, values),
+          Uair.num_vars(uair),
+          Uair.word_lookups(uair),
+          reads,
+          Keyword.get(opts, :export)
+        )
 
       with {:error, said} <- queued, do: {:error, Refusal.from_backend(said)}
     end
@@ -147,13 +118,8 @@ defmodule Zkfol.ZincPlus do
     end)
   end
 
-  # The NIF reads every op as an atom and an integer; add and mul carry an unread zero.
-  @spec wire(Uair.op()) :: {atom(), integer()}
-  defp wire({op, arg}), do: {op, arg}
-  defp wire(op) when is_atom(op), do: {op, 0}
-
   @doc "I hold every program constant inside the i64 the interpreter reads."
-  @spec constants_fit([{atom(), integer()}]) :: :ok | {:error, Refusal.t()}
+  @spec constants_fit([Uair.op()]) :: :ok | {:error, Refusal.t()}
   def constants_fit(program) do
     Refusal.refute(
       program,

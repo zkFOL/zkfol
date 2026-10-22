@@ -60,7 +60,7 @@ struct Report {
 }
 
 mod atoms {
-    rustler::atoms! { up, down, add, mul, constant = "const", zinc_plus }
+    rustler::atoms! { zinc_plus }
 }
 
 /// The trace payload as Elixir tags it, one variant per cell width.
@@ -90,70 +90,54 @@ struct Job {
 static JOBS: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-fn decode_program(program: Vec<(rustler::types::atom::Atom, i64)>) -> Result<Vec<Op>, String> {
-    program
-        .into_iter()
-        .map(|(op, arg)| {
-            if op == atoms::up() {
-                Ok(Op::Up(arg as usize))
-            } else if op == atoms::down() {
-                Ok(Op::Down(arg as usize))
-            } else if op == atoms::constant() {
-                Ok(Op::Const(arg))
-            } else if op == atoms::add() {
-                Ok(Op::Add)
-            } else if op == atoms::mul() {
-                Ok(Op::Mul)
-            } else {
-                Err("unknown op".to_string())
-            }
-        })
-        .collect()
-}
-
-/// One queued UAIR, as Elixir's Payload struct decodes.
+/// The compiled UAIR fields used by the prover; inspection metadata stays in Elixir.
 #[derive(NifStruct)]
-#[module = "Zkfol.ZincPlus.Payload"]
-struct Request {
-    num_cols: usize,
+#[module = "Zkfol.Uair"]
+struct CompiledUair {
     num_public: usize,
     shifts: Vec<(usize, usize)>,
-    program: Vec<(rustler::types::atom::Atom, i64)>,
-    cells: Payload,
-    word_lookups: Vec<(usize, usize)>,
+    program: Vec<Op>,
     selected_lookups: Vec<Selected>,
     permuted_lookups: Vec<Permuted>,
     point_ties: Vec<Tie>,
-    reads: Vec<(usize, Vec<usize>, usize)>,
-    num_vars: usize,
-    export: Option<String>,
 }
 
 /// Queue the statement and return the id its verdict will answer to.
 #[rustler::nif]
-fn prove_fol(env: Env, request: Request) -> Result<u64, String> {
-    let program = decode_program(request.program)?;
+fn prove_fol(
+    env: Env,
+    uair: CompiledUair,
+    cells: Payload,
+    num_vars: usize,
+    word_lookups: Vec<(usize, usize)>,
+    reads: Vec<(usize, Vec<usize>, usize)>,
+    export: Option<String>,
+) -> Result<u64, String> {
+    let num_cols = match &cells {
+        Payload::I64(columns) => columns.len(),
+        Payload::Big(columns) | Payload::Huge(columns) => columns.len(),
+    };
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let job = Job {
         pid: env.pid(),
         id,
         statement: Statement {
-            num_vars: request.num_vars,
-            public: public(&request.cells, request.num_public),
+            num_vars,
+            public: public(&cells, uair.num_public),
             spec: Spec {
-                num_cols: request.num_cols,
-                num_public: request.num_public,
-                shifts: request.shifts,
-                program,
-                word_lookups: request.word_lookups,
-                selected: request.selected_lookups,
-                permuted: request.permuted_lookups,
-                point_ties: request.point_ties,
-                reads: request.reads,
+                num_cols,
+                num_public: uair.num_public,
+                shifts: uair.shifts,
+                program: uair.program,
+                word_lookups,
+                selected: uair.selected_lookups,
+                permuted: uair.permuted_lookups,
+                point_ties: uair.point_ties,
+                reads,
             },
         },
-        payload: request.cells,
-        export: request.export,
+        payload: cells,
+        export,
     };
 
     JOBS.get_or_init(|| {

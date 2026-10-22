@@ -56,7 +56,7 @@ pub struct Tie {
 }
 
 /// One postfix op of the constraint program.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, rustler::NifTaggedEnum, Serialize, Deserialize)]
 pub enum Op {
     Up(usize),
     Down(usize),
