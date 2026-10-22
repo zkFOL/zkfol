@@ -166,7 +166,7 @@ defmodule Examples.EDoubling do
   example recurrence_meanings do
     fib = EUser.fib()
     zero = Zkfol.Lang.rel(:natural, do: natural(0))
-    denied = quote(do: 1 > 2)
+    denied = "> 1 2"
 
     for rels <- [
           [%{fib | al: denied}],

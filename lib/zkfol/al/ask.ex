@@ -15,13 +15,13 @@ defmodule Zkfol.Al.Ask do
 
   typedstruct enforce: true do
     field(:rels, [Zkfol.Lang.Rel.t()])
-    field(:goal, [struct()])
+    field(:goal, String.t())
     field(:arguments, [Zkfol.Statement.datum() | :_])
     field(:branch, AL.Branch.t())
     field(:class, atom())
     field(:heap, pos_integer())
     # My methods carry the trace size as a last argument, which a fact is not.
     field(:len?, boolean())
-    field(:state, AL.t() | nil, default: nil)
+    field(:state, AL.JAM.State.t() | nil, default: nil)
   end
 end
