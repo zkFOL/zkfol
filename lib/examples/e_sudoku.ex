@@ -160,14 +160,14 @@ defmodule Examples.ESudoku do
   @spec columns([[pos_integer()]]) :: [[pos_integer()]]
   def columns(grid), do: Enum.zip_with(grid, & &1)
 
-  @doc "I am the three by three boxes of a grid, band by band, as `boxes/0` derives them."
-  @spec boxed([[pos_integer()]]) :: [[pos_integer()]]
-  def boxed(grid),
+  @doc "I am the `blocks` by `blocks` boxes of a grid, band by band, as `boxes/0` derives them."
+  @spec boxed([[pos_integer()]], pos_integer()) :: [[pos_integer()]]
+  def boxed(grid, blocks),
     do:
       for(
-        band <- Enum.chunk_every(grid, 3),
-        stack <- 0..2,
-        do: Enum.flat_map(band, &Enum.slice(&1, stack * 3, 3))
+        band <- Enum.chunk_every(grid, blocks),
+        stack <- 0..(blocks - 1),
+        do: Enum.flat_map(band, &Enum.slice(&1, stack * blocks, blocks))
       )
 
   @doc "I am the act: the grid the relations check, and the prover's alone."
@@ -196,18 +196,18 @@ defmodule Examples.ESudoku do
   @doc "A Latin square with shared boxes: refused over boxes the act never handed in."
   @spec a_shared_box_is_no_answer() :: Refusal.t()
   example a_shared_box_is_no_answer do
-    latin = for i <- 0..8, do: for(j <- 0..8, do: rem(i + j, 9) + 1)
+    latin = for i <- 0..3, do: for(j <- 0..3, do: rem(i + j, 4) + 1)
 
     assert held?(latin ++ columns(latin))
-    refute held?(boxed(latin))
+    refute held?(boxed(latin, 2))
 
     {:error, Witness, refusal, []} =
-      Pipeline.run(EUser.plain(), %Statement{rels: [sudoku()], args: [latin, 3]})
+      Pipeline.run(EUser.plain(), %Statement{rels: [sudoku()], args: [latin, 2]})
 
     assert {:no_answer, %{relation: :sudoku}} = refusal
     refusal
   end
 
   @spec held?([[pos_integer()]]) :: boolean()
-  defp held?(groups), do: Enum.all?(groups, &(Enum.sort(&1) == Enum.to_list(1..9)))
+  defp held?(groups), do: Enum.all?(groups, &(Enum.sort(&1) == Enum.to_list(1..length(&1))))
 end
