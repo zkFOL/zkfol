@@ -14,6 +14,86 @@ defmodule Examples.EPassed do
   alias Zkfol.Semantics
   alias Zkfol.Statement
 
+  defrel add(k, x, y) do
+    y = x + k
+  end
+
+  @doc "An equation's local name stays a variable even when a relation has the same name."
+  @spec equation_local_name() :: Derivation.t()
+  example equation_local_name do
+    root =
+      rel :local_number do
+        local_number(x) do
+          add = 3
+          x = add + 1
+        end
+      end
+
+    {:ok, derivation} = Al.derived(root, [:_])
+    assert Derivation.root(derivation, :local_number) == {:local_number, [4]}
+    derivation
+  end
+
+  defrel bound_callback(f, x, y) do
+    f(x)
+    add(1, x, y)
+    f = natural()
+  end
+
+  @doc "A local or head callback binds in every goal order, including across another call."
+  @spec callback_goal_order() :: [Lay.t()]
+  example callback_goal_order do
+    root = bound_callback()
+    [{head, body}] = root.clauses
+
+    for {params, args} <- [{head, [:_, 7, :_]}, {tl(head), [7, :_]}],
+        a <- body,
+        b <- body,
+        b != a,
+        c <- body,
+        c not in [a, b] do
+      rel = %{root | arity: length(params), clauses: [{params, [a, b, c]}]}
+      {:ok, pred, alloc} = Phi.compile(rel, nil, args)
+      {:ok, derivation} = Al.derived(rel, args)
+      {:bound_callback, answer} = Derivation.root(derivation, :bound_callback)
+      assert Enum.take(answer, -2) == [7, 8]
+      lay = Lay.of(derivation, alloc)
+
+      assert {:ok, %Prover.Report{}, _id} =
+               Prover.prove(Alloc.link(pred, alloc), Lay.witness(lay))
+
+      assert {:error, {:no_answer, _}} = Al.derived(rel, List.replace_at(args, -1, 9))
+      lay
+    end
+  end
+
+  defrel invoke(f, x, y), do: f(x, y)
+
+  defrel captured_callback(k, x, y) do
+    f(x, y)
+    f = invoke(add(k * k + 1))
+  end
+
+  @doc "Nested closures capture private arithmetic through equality and retain its constraints."
+  @spec callback_captures() :: [Lay.t()]
+  example callback_captures do
+    root = captured_callback()
+    {:ok, pred, alloc} = Phi.compile(root, nil, [2, 7, :_])
+    linked = Alloc.link(pred, alloc)
+
+    for {k, x} <- [{2, 7}, {5, 4}] do
+      assert {:ok, ^pred, ^alloc} = Phi.compile(root, nil, [k, x, :_])
+      {:ok, derivation} = Al.derived(root, [k, x, :_])
+      assert Derivation.root(derivation, root.name) == {root.name, [k, x, k * k + x + 1]}
+      lay = Lay.of(derivation, alloc)
+      witness = Lay.witness(lay)
+      assert {:ok, %Prover.Report{}, _id} = Prover.prove(linked, witness)
+      {:ok, [{_name, row, column} | _presence]} = Lay.claims(lay, [3])
+      refute Semantics.valid?(linked, EAst.tamper(witness, row, column, k * k + x))
+      lay
+    end
+  end
+
   defrel counted(xs) do
     each(xs, natural())
   end
@@ -103,7 +183,7 @@ defmodule Examples.EPassed do
     odd_last(n - 2, tail, out)
   end
 
-  @doc "A fractional stride has no bank length, so the list stays terms."
+  @doc "A nonunit scalar step works with an undeclared list in term storage."
   @spec strided_last() :: Statement.t()
   example strided_last do
     {:ok, statement, _trace} =
@@ -128,7 +208,7 @@ defmodule Examples.EPassed do
     last_call(n, xs, out)
   end
 
-  @doc "A callee whose extent is unknown leaves the caller's list as terms."
+  @doc "Mutually recursive calls share an undeclared list through term storage."
   @spec mutual_last() :: Statement.t()
   example mutual_last do
     rels = [last_call(), last_step()]
@@ -154,7 +234,7 @@ defmodule Examples.EPassed do
     loose_last(n - 2, tail, out)
   end
 
-  @doc "Two bases and two strides that disagree on the length leave the list as terms."
+  @doc "Alternative bases and strides work without inferring the list length."
   @spec loosely_stepped() :: Statement.t()
   example loosely_stepped do
     {:ok, statement, _trace} =
@@ -172,7 +252,7 @@ defmodule Examples.EPassed do
     last_at(n - 2, tail, out)
   end
 
-  @doc "Different bases and strides that agree on length(xs) = n - 4 give one extent."
+  @doc "Different bases and strides constrain the same list through ordinary calls."
   @spec agreeing_bases() :: Statement.t()
   example agreeing_bases do
     {:ok, statement, _trace} =

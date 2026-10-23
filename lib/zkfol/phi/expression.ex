@@ -4,12 +4,16 @@ defmodule Zkfol.Phi.Expression do
 
   Substitution replaces names without evaluating the term. A complete expression can
   be read as arithmetic or passed to a call; an incomplete sum can identify its unknown.
+  Unallocated parameters keep their identity. Only arithmetic reads them as scalars.
 
   ### Public API
 
+  - `scoped/2`: qualify source variables by call site.
+  - `callee/4`: resolve a named or passed relation and its arguments.
   - `substitute/2`: the term with its known names substituted.
   - `resolve/2`, `resolve!/2`: the expression, or the names still needed.
   - `argument/2`: the value handed to a call, retaining a parameter's identity.
+  - `dependencies/2`: unresolved names and parameter identities in a term.
   - `solve/2`: the expression, or its one unknown in a sum.
   """
 
@@ -29,8 +33,39 @@ defmodule Zkfol.Phi.Expression do
             | {:papply, Term.name(), [symbolic()]}
           )
           | [symbolic()]
-  @type waiting :: {:waiting, [name()]}
+  @type dependency ::
+          name() | Ast.row_ref() | {:storage | :scalar, Ast.row_ref()} | {:array, name()}
+  @type waiting :: {:waiting, [dependency()]}
   @type result :: {:ok, Value.t()} | waiting()
+
+  @doc "I qualify source variables by their call site."
+  @spec scoped(term(), [atom() | non_neg_integer()]) :: term()
+  def scoped({:var, name}, scope), do: {:var, {scope, name}}
+
+  def scoped({op, a, b}, scope) when op in [:eq, :add, :mul, :cons],
+    do: {op, scoped(a, scope), scoped(b, scope)}
+
+  def scoped({:call, q, args}, scope), do: {:call, scoped(q, scope), scoped(args, scope)}
+  def scoped({:papply, q, args}, scope), do: {:papply, q, scoped(args, scope)}
+  def scoped({:reify, goal}, scope), do: {:reify, scoped(goal, scope)}
+  def scoped(terms, scope) when is_list(terms), do: Enum.map(terms, &scoped(&1, scope))
+  def scoped(leaf, _scope), do: leaf
+
+  @doc "I resolve a named or passed relation and prepend its captured arguments."
+  @spec callee(term(), [term()], Walk.t(), %{atom() => Zkfol.Lang.Rel.t()}) ::
+          {:ok, Zkfol.Lang.Rel.t(), [term()]} | waiting()
+  def callee({:var, _} = q, args, walk, scope) do
+    with {:ok, value} <- resolve(q, walk) do
+      case value do
+        {:rel, p, fixed} -> callee(p, fixed ++ args, walk, scope)
+        {:fresh, ref} -> {:waiting, [ref]}
+        other -> throw({:refused, {:unliftable_term, %{term: other}}})
+      end
+    end
+  end
+
+  def callee(q, args, _walk, scope),
+    do: {:ok, scope[q] || throw({:refused, {:relation_not_in_scope, %{relation: q}}}), args}
 
   @doc "I substitute known bindings without assigning a value to an unknown name."
   @spec substitute(term(), Walk.t()) :: symbolic()
@@ -52,10 +87,19 @@ defmodule Zkfol.Phi.Expression do
     value = substitute(term, walk)
 
     case Term.names(value) do
-      [] -> {:ok, read(value, walk)}
+      [] -> {:ok, read(value)}
       missing -> {:waiting, Enum.uniq(missing)}
     end
   end
+
+  @doc "I collect unresolved names and parameter identities after following aliases."
+  @spec dependencies(term(), Walk.t()) :: [name() | Ast.row_ref()]
+  def dependencies(term, walk), do: term |> substitute(walk) |> missing() |> Enum.uniq()
+
+  defp missing({tag, name}) when tag in [:var, :fresh], do: [name]
+  defp missing(term) when is_tuple(term), do: term |> Tuple.to_list() |> missing()
+  defp missing(terms) when is_list(terms), do: Enum.flat_map(terms, &missing/1)
+  defp missing(_literal), do: []
 
   @doc "I require an expression whose variables have values."
   @spec resolve!(term(), Walk.t()) :: Value.t()
@@ -71,10 +115,9 @@ defmodule Zkfol.Phi.Expression do
   def argument(term, walk) do
     value = substitute(term, walk)
 
-    case {term, value, Term.names(value)} do
-      {{:var, _name}, fresh = {:fresh, _ref}, []} -> fresh
-      {_term, value, []} -> read(value, walk)
-      {_term, _value, _names} -> :fresh
+    case Term.names(value) do
+      [] -> read(value)
+      _names -> :fresh
     end
   end
 
@@ -87,10 +130,10 @@ defmodule Zkfol.Phi.Expression do
 
     case unknown do
       [] ->
-        {:ok, read(value, walk)}
+        {:ok, read(value)}
 
       [{:var, name}] ->
-        rest = known |> Enum.map(&Value.scalar(read(&1, walk))) |> Enum.reduce(0, &Ast.add/2)
+        rest = known |> Enum.map(&Value.scalar(read(&1))) |> Enum.reduce(0, &Ast.add/2)
         {:free, name, rest}
 
       _several ->
@@ -98,15 +141,14 @@ defmodule Zkfol.Phi.Expression do
     end
   end
 
-  defp read(term, walk) do
-    case map_children(term, &read(&1, walk)) do
+  defp read(term) do
+    case map_children(term, &read/1) do
       {:add, a, b} -> Ast.add(Value.scalar(a), Value.scalar(b))
       {:mul, a, b} -> Ast.mul(Value.scalar(a), Value.scalar(b))
-      {:cons, h, t} -> Place.consed(h, t, walk.shapes)
+      {:cons, h, t} -> Place.consed(h, t)
       {:papply, p, fixed} -> {:rel, Zkfol.Lang.Rel.name(p), fixed}
-      fresh = {:fresh, _ref} -> Value.scalar(fresh)
       nil -> []
-      value -> Value.shaped(value, walk.shapes)
+      value -> value
     end
   end
 

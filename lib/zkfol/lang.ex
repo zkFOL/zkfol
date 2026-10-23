@@ -105,6 +105,16 @@ defmodule Zkfol.Lang do
   defp term({:reify, _, [inner]}, scope), do: {:reify, goal(inner, 0, scope)}
   defp term(q, _scope) when is_integer(q), do: q
   defp term(s, scope) when is_binary(s), do: term(String.to_charlist(s), scope)
+  defp term({:<<>>, _meta, parts}) do
+    {prefix, tail} =
+      case List.pop_at(parts, -1) do
+        {{:"::", _, [tail, {:array, _, _}]}, prefix} -> {prefix, term(tail)}
+        _closed -> {parts, nil}
+      end
+
+    Enum.reduce(Enum.reverse(prefix), tail, &{:cons, term(&1), &2})
+  end
+
   defp term([], _scope), do: nil
   defp term([{:|, _, [h, t]}], scope), do: {:cons, term(h, scope), term(t, scope)}
   defp term([h | t], scope), do: {:cons, term(h, scope), term(t, scope)}

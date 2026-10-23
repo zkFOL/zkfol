@@ -7,6 +7,7 @@ defmodule Examples.ESudoku do
   import ExUnit.Assertions
 
   alias Examples.EUser
+  alias Zkfol.{Al, Alloc, Interpretation, Lay, Phi, Semantics}
   alias Zkfol.Log
   alias Zkfol.Pipeline
   alias Zkfol.Prover
@@ -30,42 +31,46 @@ defmodule Examples.ESudoku do
 
   @solution16 for r <- 0..15, do: for(c <- 0..15, do: rem(4 * rem(r, 4) + div(r, 4) + c, 16) + 1)
 
-  defrel puzzle(
-           1,
-           [
-             [_, _, _, _, _, _, _, _, _],
-             [_, _, _, _, _, 3, _, 8, 5],
-             [_, _, 1, _, 2, _, _, _, _],
-             [_, _, _, 5, _, 7, _, _, _],
-             [_, _, 4, _, _, _, 1, _, _],
-             [_, 9, _, _, _, _, _, _, _],
-             [5, _, _, _, _, _, _, 7, 3],
-             [_, _, 2, _, 1, _, _, _, _],
-             [_, _, _, _, 4, _, _, _, 9]
-           ]
-         )
+  defrel puzzle(1, x) do
+    array([9, 9], x)
 
-  defrel puzzle(
-           2,
-           [
-             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-             [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4],
-             [9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8],
-             [13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
-             [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1],
-             [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5],
-             [10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-             [14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-             [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2],
-             [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6],
-             [11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-             [15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
-             [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3],
-             [8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7],
-             [12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-             [16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
-           ]
-         )
+    x =
+      [
+        [_, _, _, _, _, _, _, _, _],
+        [_, _, _, _, _, 3, _, 8, 5],
+        [_, _, 1, _, 2, _, _, _, _],
+        [_, _, _, 5, _, 7, _, _, _],
+        [_, _, 4, _, _, _, 1, _, _],
+        [_, 9, _, _, _, _, _, _, _],
+        [5, _, _, _, _, _, _, 7, 3],
+        [_, _, 2, _, 1, _, _, _, _],
+        [_, _, _, _, 4, _, _, _, 9]
+      ]
+  end
+
+  defrel puzzle(2, x) do
+    array([16, 16], x)
+
+    x =
+      [
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+        [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4],
+        [9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8],
+        [13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1],
+        [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5],
+        [10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+        [14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
+        [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2],
+        [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6],
+        [11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+        [15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+        [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3],
+        [8, 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7],
+        [12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        [16, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+      ]
+  end
 
   defrel solved(x) do
     puzzle(1, x)
@@ -119,7 +124,7 @@ defmodule Examples.ESudoku do
     end
   end
 
-  @doc "The rows, columns and boxes are a selection each: twenty-seven, on one table."
+  @doc "Twenty-seven Sudoku groups share one table; the traversal base adds one inactive selection."
   @spec pattern_selected() :: Statement.t()
   example pattern_selected do
     {:ok, statement, _trace} =
@@ -130,7 +135,7 @@ defmodule Examples.ESudoku do
     assert uair.limbs == []
     [%{values: values, selections: selections}] = uair.selected_lookups
     assert values == Enum.to_list(1..9)
-    assert length(selections) == 27
+    assert length(selections) == 28
     statement
   end
 
@@ -190,7 +195,76 @@ defmodule Examples.ESudoku do
     assert Enum.take(Zkfol.stream(solved(), act()), 1) == [act()]
     assert %Prover.Report{} = report = Log.report(Log.snapshot(), ran)
     assert report.claims == []
+    assert report.num_vars == 4
     report
+  end
+
+  @doc "Clues before the array declaration retain the same compact proof."
+  @spec clue_order() :: Prover.Report.t()
+  example clue_order do
+    puzzle = puzzle()
+
+    late = %{
+      puzzle
+      | clauses: for({head, body} <- puzzle.clauses, do: {head, Enum.reverse(body)})
+    }
+
+    ran = Zkfol.compile([solved(), late], args: act())
+    assert %Prover.Report{} = report = Log.report(Log.snapshot(), ran)
+    assert report.num_vars == proof().num_vars
+    assert report.proof_bytes == proof().proof_bytes
+    assert Alloc.width(Statement.alloc(Log.Run.final_stage(ran))) == 13
+    report
+  end
+
+  @doc "Declared grids prove without witness-dependent compilation; bad digits and boxes fail."
+  @spec declared_grids() :: [Prover.Report.t()]
+  example declared_grids do
+    for {n, blocks, grid} <- [{9, 3, @solution}, {16, 4, @solution16}] do
+      root =
+        rel :grid do
+          grid(xs) do
+            array([^n, ^n], xs)
+            sudoku(xs, ^blocks)
+          end
+        end
+
+      assert {:ok, pred, alloc} = Phi.compile(root)
+      assert {:ok, ^pred, ^alloc} = Phi.compile(root, nil, [grid])
+      {:ok, derivation} = Al.derived(root, [grid])
+      lay = Lay.of(derivation, alloc)
+      witness = Lay.witness(lay)
+      pred = Alloc.link(pred, alloc)
+      assert Semantics.valid?(pred, witness)
+      assert [%Alloc.Bank{name: bank}] = Enum.filter(alloc.members, &is_struct(&1, Alloc.Bank))
+      {:ok, claims} = Lay.claims(lay, [1])
+      assert {:ok, report, _id} = Prover.prove(pred, witness, claims: claims)
+
+      row = Alloc.row(alloc, {bank, 1})
+      refute Semantics.valid?(pred, Interpretation.put(witness, row, n + 1, n + 1))
+      {:ok, uair} = Uair.emit(pred, witness)
+      column = Enum.find_index(uair.rows, &(&1 == row))
+
+      forged = %{
+        uair
+        | columns:
+            List.update_at(uair.columns, column, &List.replace_at(&1, uair.len - n - 1, n + 1))
+      }
+
+      assert {:error, {:verifier_rejected, _}} = Prover.prove_uair(forged)
+
+      # This Latin square satisfies every row and column but violates the boxes.
+      # The root has no clues that could mask a missing box obligation.
+      cells = for i <- 0..(n - 1), j <- 0..(n - 1), do: {i, j, rem(i + j, n) + 1}
+
+      latin =
+        Enum.reduce(cells, witness, fn {i, j, value}, matrix ->
+          Interpretation.put(matrix, row + j, n + 1 - i, value)
+        end)
+
+      refute Semantics.valid?(pred, latin)
+      report
+    end
   end
 
   @doc "A Latin square with shared boxes: refused over boxes the act never handed in."

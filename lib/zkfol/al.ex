@@ -270,15 +270,15 @@ defmodule Zkfol.Al do
         names = if mode == :derivation, do: Enum.uniq(Term.names(head ++ body)), else: []
         bindings = Map.new(names, &{&1, var(&1)})
 
-        {entry, written} = body |> numbered() |> Enum.split_with(&postable?/1)
-
         with {:ok, params} <- Refusal.map(head, &arith/1),
              {:ok, posted} <-
                Refusal.flat_map(Enum.reject(body, &saying?(&1, said)), &hinted(&1, hints)),
              {:ok, goals} <-
-               Refusal.flat_map(entry ++ written, fn {goal, j} ->
+               Refusal.flat_map(Enum.with_index(body), fn {goal, j} ->
                  if saying?(goal, said), do: hinted(goal, hints), else: goals({goal, j}, i, lenp)
                end) do
+          {entry, written} = Enum.split_with(goals, &postable?/1)
+
           {:ok,
            clause(
              method(rname),
@@ -319,40 +319,36 @@ defmodule Zkfol.Al do
     AL.Term.map(goals, &Map.get(by, &1, &1))
   end
 
-  # A call's place among the calls is what tells its fresh argument names from another's.
-  @spec numbered([term()]) :: [{term(), non_neg_integer()}]
-  defp numbered(body) do
-    body
-    |> Enum.map_reduce(0, fn
-      {:call, _n, _a} = call, j -> {{call, j}, j + 1}
-      other, j -> {{other, j}, j}
-    end)
-    |> elem(0)
-  end
+  # Structure can bind before its fields. AL carries linear constraints open;
+  # nonlinear arithmetic and calls retain their written order.
+  @spec postable?(Macro.t()) :: boolean()
+  defp postable?({:unify, _, _}), do: true
+  defp postable?({:eq, _, [t, u]}), do: linear?(t) and linear?(u)
+  defp postable?(_goal), do: false
 
-  # AL's fixpoint carries a linear constraint open; a product of two unknowns waits in place.
-  @spec postable?({term(), non_neg_integer()}) :: boolean()
-  defp postable?({{:eq, t, u}, _j}), do: linear?(t) and linear?(u)
-  defp postable?({_statement, _j}), do: false
+  @spec linear?(Macro.t()) :: boolean()
+  defp linear?({:*, _, [t, u]}),
+    do: (is_integer(t) or is_integer(u)) and linear?(t) and linear?(u)
 
-  @spec linear?(term()) :: boolean()
-  defp linear?({:mul, t, u}), do: (is_integer(t) or is_integer(u)) and linear?(t) and linear?(u)
-  defp linear?({:add, t, u}), do: linear?(t) and linear?(u)
-  defp linear?({:reify, {:eq, t, u}}), do: linear?(Ast.arithmetize(Ast.eq(t, u)))
+  defp linear?({_op, _, [t, u]}), do: linear?(t) and linear?(u)
   defp linear?(_term), do: true
 
   # AL's = unifies structure and, wherever arithmetic stands, equates numbers.
   @spec goals({term(), non_neg_integer()}, non_neg_integer(), [term()]) ::
           {:ok, [term()]} | {:error, Refusal.t()}
-  defp goals({{:eq, t, u}, _j}, _i, _lenp) do
-    with {:ok, goal} <- binary(:=, t, u), do: {:ok, [goal]}
+  defp goals({{:eq, t, u}, j}, i, _lenp) do
+    if arithmetic?(t) or arithmetic?(u) do
+      with {:ok, goal} <- binary(:eq, t, u), do: {:ok, [goal]}
+    else
+      with {:ok, defs, [a, b]} <- arguments([t, u], i, j),
+           do: {:ok, defs ++ [{:unify, [], [a, b]}]}
+    end
   end
 
   defp goals({{:call, callee, args}, j}, i, lenp) do
-    with {:ok, passed} <- Refusal.map(Enum.with_index(args), &argument(&1, i, j)) do
-      {defs, args} = Enum.unzip(passed)
+    with {:ok, defs, args} <- arguments(args, i, j) do
       witness = v("_B#{i}c#{j}")
-      {:ok, Enum.concat(defs) ++ sent(callee, args ++ lenp ++ [witness], i, j)}
+      {:ok, defs ++ sent(callee, args ++ lenp ++ [witness], i, j)}
     end
   end
 
@@ -371,28 +367,43 @@ defmodule Zkfol.Al do
 
   defp sent(name, args, _i, _j), do: [call(method(name), [@self | args])]
 
-  # A passed relation is a compound term until a call sends it.
-  @spec argument({term(), term()}, non_neg_integer(), non_neg_integer()) ::
+  # Calls and equations consume the same values. Only arithmetic needs a fresh result.
+  @spec arguments([term()], non_neg_integer(), term()) ::
+          {:ok, [Macro.t()], [Macro.t()]} | {:error, Refusal.t()}
+  defp arguments(terms, i, j) do
+    with {:ok, passed} <- Refusal.map(Enum.with_index(terms), &argument(&1, i, j)) do
+      {defs, values} = Enum.unzip(passed)
+      {:ok, Enum.concat(defs), values}
+    end
+  end
+
+  @spec argument({term(), term()}, non_neg_integer(), term()) ::
           {:ok, {[term()], term()}} | {:error, Refusal.t()}
   defp argument({{:papply, name, prefix}, k}, i, j) do
-    with {:ok, fixed} <-
-           Refusal.map(Enum.with_index(prefix), fn {held, p} ->
-             argument({held, "#{k}p#{p}"}, i, j)
-           end) do
-      {built, bound} = Enum.unzip(fixed)
-      {:ok, {Enum.concat(built), call(method(name), bound)}}
-    end
+    with {:ok, defs, fixed} <- arguments(prefix, i, "#{j}a#{k}"),
+         do: {:ok, {defs, {:{}, [], [method(name), v(:self) | fixed]}}}
+  end
+
+  defp argument({{:cons, head, tail}, k}, i, j) do
+    with {:ok, defs, [head, tail]} <- arguments([head, tail], i, "#{j}a#{k}"),
+         do: {:ok, {defs, [{:|, [], [head, tail]}]}}
   end
 
   defp argument({term, k}, i, j) do
     fresh = v("_Q#{i}c#{j}a#{k}")
 
     with {:ok, lifted} <- arith(term) do
-      if is_integer(term) or match?({:var, _nm}, term) or Term.sequence?(term),
-        do: {:ok, {[], lifted}},
-        else: {:ok, {[call(:=, [fresh, lifted])], fresh}}
+      if arithmetic?(term),
+        do: {:ok, {[{:eq, [], [fresh, lifted]}], fresh}},
+        else: {:ok, {[], lifted}}
     end
   end
+
+  @spec arithmetic?(term()) :: boolean()
+  defp arithmetic?(term),
+    do:
+      term == :len or match?({:reify, _}, term) or
+        match?({op, _, _} when op in [:add, :mul], term)
 
   @spec arith(term()) :: {:ok, term()} | {:error, Refusal.t()}
   defp arith(q) when is_integer(q), do: {:ok, q}
