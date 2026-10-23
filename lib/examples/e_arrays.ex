@@ -1,7 +1,7 @@
 defmodule Examples.EArrays do
   @moduledoc "I exercise declared arrays, shared traversal rows and structural matching."
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
   import ExUnit.Assertions
 
   alias Zkfol.{Al, Alloc, Array, Ast, Interpretation, Lay, Phi, Prover, Semantics, Uair}
@@ -60,16 +60,16 @@ defmodule Examples.EArrays do
   end
 
   defrel passed(xs, ys) do
-    invoke(declared, xs, ys)
+    invoke(declared(), xs, ys)
   end
 
   defrel nested(xs, ys) do
-    map(xs, mapped, ys)
+    map(xs, mapped(), ys)
   end
 
   defrel transposed_map(xs, ys) do
     column(xs, columns)
-    map(columns, mapped, results)
+    map(columns, mapped(), results)
     column(results, ys)
   end
 
@@ -122,7 +122,7 @@ defmodule Examples.EArrays do
   end
 
   defrel totals(xs, ys) do
-    map(xs, row_total, ys)
+    map(xs, row_total(), ys)
   end
 
   defrel checked_transpose(xs) do
@@ -174,7 +174,7 @@ defmodule Examples.EArrays do
   @spec deferred_dimensions() :: Lay.t()
   example deferred_dimensions do
     root =
-      rel :deferred_grid do
+      rel do
         deferred_grid(xs) do
           array([rows, cols], xs)
           rows = side + 0
@@ -374,8 +374,7 @@ defmodule Examples.EArrays do
       root = %Rel{
         name: :invalid_array,
         arity: 1,
-        home: __MODULE__,
-        clauses: [{[{:var, :xs}], [{:call, :array, [dimensions, {:var, :xs}]}]}]
+        clauses: [{[{:var, :xs}], [{:call, &Zkfol.FOL.array/0, [dimensions, {:var, :xs}]}]}]
       }
 
       assert {:error, {:array_shape, _} = refusal} = Phi.compile(root)
@@ -391,7 +390,7 @@ defmodule Examples.EArrays do
     n = 3
 
     anonymous =
-      rel :declared_here do
+      rel do
         declared_here(xs, ys) do
           array([^n], xs)
           array([^n], ys)
@@ -458,11 +457,11 @@ defmodule Examples.EArrays do
   end
 
   defrel mixed_map(xs, ys) do
-    map(xs, mixed, ys)
+    map(xs, mixed(), ys)
   end
 
   defrel mixed_array_map(xs, ys) do
-    map(xs, mixed_array, ys)
+    map(xs, mixed_array(), ys)
   end
 
   @doc "A recursive caller receives scalar and list results through the same parameter."
@@ -543,7 +542,7 @@ defmodule Examples.EArrays do
 
   defrel passed_array(xs) do
     xs = [_, 2]
-    invoke(sized_array, n, xs)
+    invoke(sized_array(), n, xs)
     array_size(n)
   end
 
@@ -653,13 +652,12 @@ defmodule Examples.EArrays do
 
     goals =
       for {i, dimensions} <- Enum.sort(arrays),
-          do: {:call, :array, [list_term(dimensions), Enum.at(args, i)]}
+          do: {:call, &Zkfol.FOL.array/0, [list_term(dimensions), Enum.at(args, i)]}
 
     %Rel{
       name: :"array #{rel.name}",
       arity: rel.arity,
-      home: rel.home,
-      clauses: [{args, goals ++ [{:call, {rel.home, rel.name}, args}]}]
+      clauses: [{args, goals ++ [{:call, fn -> rel end, args}]}]
     }
   end
 

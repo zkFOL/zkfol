@@ -88,7 +88,8 @@ defmodule Examples.EUair do
                Statement.claims(opened)
              )
 
-    assert for({"selected_when.cells", value} <- inactive.claims, do: value) == [2, 2]
+    assert {:ok, claims} = Uair.claimed(inactive)
+    assert for({"selected_when.cells", value} <- claims, do: value) == [2, 2]
     assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(inactive)
 
     for enabled <- [0, 1] do
@@ -111,13 +112,15 @@ defmodule Examples.EUair do
   @spec reported_claims_come_from_public_columns() :: Prover.Report.t()
   example reported_claims_come_from_public_columns do
     statement = EUser.fibonacci()
+    {:ok, [{_name, result, column} | _]} = Zkfol.Lay.claims(Statement.lay(statement), [2])
 
     {:ok, uair} =
-      Uair.emit(Statement.pred(statement), Statement.witness(statement), [{"fib", 1, 8}])
+      Uair.emit(Statement.pred(statement), Statement.witness(statement), [{"fib", result, column}])
 
-    [{"fib", row, 8}] = uair.claims
+    assert Uair.claimed(uair) == {:ok, [{"fib", 21}]}
+    [{"fib", row, ^column}] = uair.claims
 
-    retargeted = %{uair | claims: [{"fib", row, 7}]}
+    retargeted = %{uair | claims: [{"fib", row, column + 1}]}
     {:ok, report, _intent} = Prover.prove_uair(retargeted)
     assert report.claims == [{"fib", 13}]
     report
@@ -271,7 +274,7 @@ defmodule Examples.EUair do
       ])
 
     {:ok, uair} = Uair.emit(pred, Interpretation.new([[13], [0], [7905]]))
-    assert List.keymember?(uair.limbs, 5, 0)
+    assert Enum.map(uair.limbs, &elem(&1, 0)) == [0, 1, 2]
     assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair, name: :slacked_trace)
     uair
   end
@@ -307,7 +310,7 @@ defmodule Examples.EUair do
     forged = %{uair | columns: columns}
     assert Enum.at(Enum.at(columns, 0), uair.len - 1) >= modulus
 
-    dropped = %{forged | limbs: Enum.reject(uair.limbs, &(elem(&1, 0) in [0, 2, 5]))}
+    dropped = %{forged | limbs: Enum.reject(uair.limbs, &(elem(&1, 0) in [0, 1, 2]))}
 
     assert {:error, {:prover_failed, %{said: said}} = refused} =
              Prover.prove_uair(forged, name: :forged_remainder, unchecked: true)

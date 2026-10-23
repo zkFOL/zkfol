@@ -124,7 +124,7 @@ defmodule Examples.ENodes do
     n = length(xs)
 
     relation =
-      rel :reversed do
+      rel do
         reversed(xs, ys) do
           array([^n], xs)
           rev(xs, ys)

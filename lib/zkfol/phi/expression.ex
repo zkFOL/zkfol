@@ -64,8 +64,10 @@ defmodule Zkfol.Phi.Expression do
     end
   end
 
-  def callee(q, args, _walk, scope),
-    do: {:ok, scope[q] || throw({:refused, {:relation_not_in_scope, %{relation: q}}}), args}
+  def callee(q, args, _walk, scope) do
+    name = Zkfol.Lang.Rel.name(q)
+    {:ok, scope[name] || throw({:refused, {:relation_not_in_scope, %{relation: name}}}), args}
+  end
 
   @doc "I substitute known bindings without assigning a value to an unknown name."
   @spec substitute(term(), Walk.t()) :: symbolic()

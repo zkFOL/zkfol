@@ -22,7 +22,7 @@ defmodule Examples.EPassed do
   @spec equation_local_name() :: Derivation.t()
   example equation_local_name do
     root =
-      rel :local_number do
+      rel do
         local_number(x) do
           add = 3
           x = add + 1
@@ -70,7 +70,7 @@ defmodule Examples.EPassed do
   defrel invoke(f, x, y), do: f(x, y)
 
   defrel captured_callback(k, x, y) do
-    f(x, y)
+    f.(x, y)
     f = invoke(add(k * k + 1))
   end
 

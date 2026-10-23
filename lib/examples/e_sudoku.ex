@@ -222,7 +222,7 @@ defmodule Examples.ESudoku do
   example declared_grids do
     for {n, blocks, grid} <- [{9, 3, @solution}, {16, 4, @solution16}] do
       root =
-        rel :grid do
+        rel do
           grid(xs) do
             array([^n, ^n], xs)
             sudoku(xs, ^blocks)

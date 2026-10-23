@@ -283,7 +283,7 @@ defmodule Zkfol.Al do
            clause(
              method(rname),
              [@self | params ++ lenp ++ [bindings]],
-             reading ++ posted ++ goals
+             reading ++ posted ++ entry ++ written
            )}
         end
 
@@ -321,16 +321,15 @@ defmodule Zkfol.Al do
 
   # Structure can bind before its fields. AL carries linear constraints open;
   # nonlinear arithmetic and calls retain their written order.
-  @spec postable?(Macro.t()) :: boolean()
-  defp postable?({:unify, _, _}), do: true
-  defp postable?({:eq, _, [t, u]}), do: linear?(t) and linear?(u)
+  @spec postable?(term()) :: boolean()
+  defp postable?(%AL.Goal.Compound{name: :=, args: [t, u]}), do: linear?(t) and linear?(u)
   defp postable?(_goal), do: false
 
-  @spec linear?(Macro.t()) :: boolean()
-  defp linear?({:*, _, [t, u]}),
+  @spec linear?(term()) :: boolean()
+  defp linear?(%AL.Goal.Compound{name: :*, args: [t, u]}),
     do: (is_integer(t) or is_integer(u)) and linear?(t) and linear?(u)
 
-  defp linear?({_op, _, [t, u]}), do: linear?(t) and linear?(u)
+  defp linear?(%AL.Goal.Compound{args: [t, u]}), do: linear?(t) and linear?(u)
   defp linear?(_term), do: true
 
   # AL's = unifies structure and, wherever arithmetic stands, equates numbers.
@@ -338,10 +337,10 @@ defmodule Zkfol.Al do
           {:ok, [term()]} | {:error, Refusal.t()}
   defp goals({{:eq, t, u}, j}, i, _lenp) do
     if arithmetic?(t) or arithmetic?(u) do
-      with {:ok, goal} <- binary(:eq, t, u), do: {:ok, [goal]}
+      with {:ok, goal} <- binary(:=, t, u), do: {:ok, [goal]}
     else
       with {:ok, defs, [a, b]} <- arguments([t, u], i, j),
-           do: {:ok, defs ++ [{:unify, [], [a, b]}]}
+           do: {:ok, defs ++ [call(:=, [a, b])]}
     end
   end
 
@@ -369,7 +368,7 @@ defmodule Zkfol.Al do
 
   # Calls and equations consume the same values. Only arithmetic needs a fresh result.
   @spec arguments([term()], non_neg_integer(), term()) ::
-          {:ok, [Macro.t()], [Macro.t()]} | {:error, Refusal.t()}
+          {:ok, [term()], [term()]} | {:error, Refusal.t()}
   defp arguments(terms, i, j) do
     with {:ok, passed} <- Refusal.map(Enum.with_index(terms), &argument(&1, i, j)) do
       {defs, values} = Enum.unzip(passed)
@@ -381,12 +380,12 @@ defmodule Zkfol.Al do
           {:ok, {[term()], term()}} | {:error, Refusal.t()}
   defp argument({{:papply, name, prefix}, k}, i, j) do
     with {:ok, defs, fixed} <- arguments(prefix, i, "#{j}a#{k}"),
-         do: {:ok, {defs, {:{}, [], [method(name), v(:self) | fixed]}}}
+         do: {:ok, {defs, call(method(name), fixed)}}
   end
 
   defp argument({{:cons, head, tail}, k}, i, j) do
     with {:ok, defs, [head, tail]} <- arguments([head, tail], i, "#{j}a#{k}"),
-         do: {:ok, {defs, [{:|, [], [head, tail]}]}}
+         do: {:ok, {defs, [head | tail]}}
   end
 
   defp argument({term, k}, i, j) do
@@ -394,7 +393,7 @@ defmodule Zkfol.Al do
 
     with {:ok, lifted} <- arith(term) do
       if arithmetic?(term),
-        do: {:ok, {[{:eq, [], [fresh, lifted]}], fresh}},
+        do: {:ok, {[call(:=, [fresh, lifted])], fresh}},
         else: {:ok, {[], lifted}}
     end
   end
