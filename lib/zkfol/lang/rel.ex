@@ -13,10 +13,11 @@ defmodule Zkfol.Lang.Rel do
     field(:name, atom())
     field(:arity, non_neg_integer())
     field(:clauses, [{[term()], [term()]}])
-    # `phi` specializes lowering. `al` posts an additional constraint; a `:definition`
-    # can also replace the clauses when asking for answers without a source derivation.
+    # `phi` specializes lowering. `al` posts an additional constraint, AL source over the
+    # parameters capitalised; a `:definition` can also replace the clauses when asking for
+    # answers without a source derivation.
     field(:phi, {module(), atom()} | nil, default: nil, enforce: false)
-    field(:al, Macro.t() | {:definition, Macro.t()} | nil, default: nil, enforce: false)
+    field(:al, String.t() | {:definition, String.t()} | nil, default: nil, enforce: false)
   end
 
   @doc "I read a constructor's relation name, or retain a self name or variable target."

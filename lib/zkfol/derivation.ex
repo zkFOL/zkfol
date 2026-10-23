@@ -26,10 +26,14 @@ defmodule Zkfol.Derivation do
   @typedoc "The relations by the method each is installed as: its name and arity."
   @type methods :: %{atom() => {atom(), non_neg_integer()}}
 
-  @spec of(AL.t(), methods(), boolean()) :: t()
-  def of(%AL{domino: %{trace: trace}, active_choicepoint: %{store: store}}, names, len?) do
-    tree = trace |> Enum.reverse() |> AL.Trace.derivation_tree(store)
-    nodes = tree |> List.wrap() |> Enum.flat_map(&walk(&1, names, len?, store))
+  @spec of(AL.JAM.State.t(), methods(), boolean()) :: t()
+  def of(state = %AL.JAM.State{active_choicepoint: %{store: store}}, names, len?) do
+    nodes =
+      state
+      |> AL.Trace.derivation_tree()
+      |> calls()
+      |> Enum.flat_map(&walk(&1, names, len?, store))
+
     facts = nodes |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
     digested = Map.new(nodes)
     ran = for fact <- facts, do: {fact, Map.fetch!(digested, fact)}
@@ -61,27 +65,38 @@ defmodule Zkfol.Derivation do
   @spec consumption(t()) :: [{fact(), [fact()]}]
   def consumption(%__MODULE__{consumed: consumed}), do: consumed
 
-  @spec walk(map(), methods(), boolean(), map()) :: [
+  # A call is a method node beside the answer it gave: the clause chosen, what it derived and
+  # the nodes beneath. Every other node only holds calls.
+  @spec calls([map()]) :: [{term(), map()}]
+  defp calls(nodes) do
+    Enum.flat_map(nodes, fn
+      %{kind: :method, label: label, children: answers} -> for a <- answers, do: {label, a}
+      %{children: kids} -> calls(kids)
+    end)
+  end
+
+  @spec walk({term(), map()}, methods(), boolean(), map()) :: [
           {fact(), {[fact()], non_neg_integer() | nil, %{atom() => term()}}}
         ]
-  defp walk(node = %{label: label, children: kids}, names, len?, store) do
+  defp walk({label, answer}, names, len?, store) do
+    kids = calls(answer.children)
     below = Enum.flat_map(kids, &walk(&1, names, len?, store))
 
     if fact?(label, names, len?) do
       consumed =
-        for %{label: kid_label} = kid <- kids,
-            fact?(kid_label, names, len?),
-            do: fact_of(kid, names, store)
+        for {kid, kid_answer} <- kids,
+            fact?(kid, names, len?),
+            do: fact_of(kid, kid_answer.derived, names, store)
 
       {_self, _method, args} = label
-      bindings = args |> List.last() |> resolved(node.derived) |> AL.Var.subst(store)
-      below ++ [{fact_of(node, names, store), {consumed, node.clause, bindings}}]
+      bindings = args |> List.last() |> resolved(answer.derived) |> AL.Var.subst(store)
+
+      below ++
+        [{fact_of(label, answer.derived, names, store), {consumed, answer.clause, bindings}}]
     else
       below
     end
   end
-
-  defp walk(_node, _names, _len?, _store), do: []
 
   # I match a journal node to a relation by its method name and arity.
   @spec fact?(term(), methods(), boolean()) :: boolean()
@@ -94,8 +109,8 @@ defmodule Zkfol.Derivation do
 
   defp fact?(_label, _names, _len?), do: false
 
-  @spec fact_of(map(), methods(), map()) :: fact()
-  defp fact_of(%{label: {_self, m, args}, derived: derived}, names, store) do
+  @spec fact_of(term(), map() | nil, methods(), map()) :: fact()
+  defp fact_of({_self, m, args}, derived, names, store) do
     {name, arity} = Map.fetch!(names, m)
 
     values =
