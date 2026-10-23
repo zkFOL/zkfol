@@ -13,85 +13,77 @@ defmodule Zkfol.Uair.Composed do
   alias Zkfol.Uair
   alias Zkfol.Uair.Plain
 
+  @typep row ::
+           {:bit, pos_integer(), non_neg_integer()}
+           | {:lower, pos_integer()}
+           | {pos_integer(), pos_integer()}
+
   typedstruct enforce: true do
     field(:reads, [Uair.read()], default: [])
   end
 
   typedstruct module: Lowering do
     @typedoc """
-    What the lowering derived: the dynamic pointer rows, the bit rows spelling each,
-    the deref pairs, and the row each pair's value lands on. Empty when there was
-    nothing to lower.
+    The composed reads in witness coordinates and the rows requiring Word bounds.
     """
-    field(:dynamic, [pos_integer()], default: [])
-    field(:lower, %{pos_integer() => pos_integer()}, default: %{})
-    field(:bits, %{pos_integer() => [pos_integer()]}, default: %{})
-    field(:pairs, [{pos_integer(), pos_integer()}], default: [])
-    field(:results, %{{pos_integer(), pos_integer()} => pos_integer()}, default: %{})
+    field(:reads, [Uair.read()], default: [])
+    # Bound pointers even at the backend's exempt final row, and their pointer - 1 slacks.
+    field(:bounded, [pos_integer()], default: [])
   end
 
   @doc "I lower every pointer read: mu bit rows apiece, a result row per deref, on the witness."
   @spec lower(Ast.pred(), Interpretation.t(), pos_integer()) ::
           {:ok, Ast.pred(), Interpretation.t(), Lowering.t()} | {:error, Refusal.t()}
   def lower(pred, witness, mu) do
-    case Ast.pointer_reads(pred) do
+    case Ast.pointer_derefs(pred) do
       [] ->
         {:ok, pred, witness, %Lowering{}}
 
-      dynamic ->
-        pairs = Enum.filter(Ast.pointer_derefs(pred), fn {_i, j} -> j in dynamic end)
-
+      pairs ->
         # The order is load-bearing: asking whether a row is confined reads it.
         with :ok <- inside(pairs, witness),
              :ok <- confined(pairs, witness) do
-          arity = Interpretation.arity(witness)
+          dynamic = pairs |> Enum.map(&elem(&1, 1)) |> Enum.uniq() |> Enum.sort()
+
+          leaves =
+            for(a <- dynamic, nu <- 0..(mu - 1), do: {:bit, a, nu}) ++
+              Enum.map(dynamic, &{:lower, &1}) ++ pairs
+
+          {witness, rows} = Uair.rowed(witness, leaves, &value(&1, witness, &2))
 
           bits =
-            dynamic
-            |> Enum.with_index()
-            |> Map.new(fn {a, k} -> {a, Enum.map(1..mu, &(arity + k * mu + &1))} end)
+            Map.new(dynamic, fn a -> {a, for(nu <- 0..(mu - 1), do: rows[{:bit, a, nu}])} end)
 
-          lower = Map.new(Enum.with_index(dynamic, arity + length(dynamic) * mu + 1))
-          results = Map.new(Enum.with_index(pairs, arity + length(dynamic) * (mu + 1) + 1))
+          reads =
+            for {i, a} <- pairs do
+              %{row: a, value_row: i, bit_rows: bits[a], result_row: rows[{i, a}]}
+            end
 
-          {:ok, rewrite(pred, constraints(dynamic, bits, lower), results),
-           extend(witness, dynamic, pairs, mu),
-           %Lowering{dynamic: dynamic, bits: bits, lower: lower, pairs: pairs, results: results}}
+          bounded = dynamic ++ Enum.map(dynamic, &rows[{:lower, &1}])
+
+          {:ok, rewrite(pred, constraints(dynamic, bits, rows), rows), witness,
+           %Lowering{reads: reads, bounded: bounded}}
         end
     end
   end
 
-  @doc "I am the value rows the pointer query binds, unmentioned by the predicate."
-  @spec value_rows(Lowering.t()) :: [pos_integer()]
-  def value_rows(%Lowering{pairs: pairs}), do: Enum.map(pairs, &elem(&1, 0))
-
   @doc "I am the mode a lowering leaves: its rows in committed-column coordinates."
   @spec emitted(Lowering.t(), %{pos_integer() => non_neg_integer()}) :: Uair.mode()
-  def emitted(%Lowering{dynamic: []}, _cols), do: %Plain{}
+  def emitted(%Lowering{reads: []}, _cols), do: %Plain{}
 
   def emitted(lowering, cols) do
     reads =
-      for {i, a} <- lowering.pairs do
+      for read <- lowering.reads do
         %{
-          row: Map.fetch!(cols, a),
-          value_row: Map.fetch!(cols, i),
-          bit_rows: Enum.map(Map.fetch!(lowering.bits, a), &Map.fetch!(cols, &1)),
-          result_row: Map.fetch!(cols, Map.fetch!(lowering.results, {i, a}))
+          row: Map.fetch!(cols, read.row),
+          value_row: Map.fetch!(cols, read.value_row),
+          bit_rows: Enum.map(read.bit_rows, &Map.fetch!(cols, &1)),
+          result_row: Map.fetch!(cols, read.result_row)
         }
       end
 
     %__MODULE__{reads: reads}
   end
-
-  @doc """
-  I name the Word-bounded rows: pointers and their lower-bound slacks. The bits
-  spell `len - pointer`; the slack spells `pointer - 1`. Bounding the pointer
-  itself also retains its Word bound at the backend’s exempt final row.
-  """
-  @spec bounded_rows(Lowering.t()) :: [pos_integer()]
-
-  def bounded_rows(lowering),
-    do: lowering.dynamic ++ Enum.map(lowering.dynamic, &Map.fetch!(lowering.lower, &1))
 
   @spec spelled([pos_integer()], Ast.term_t()) :: [Ast.pred()]
   defp spelled(rows, source) do
@@ -129,64 +121,42 @@ defmodule Zkfol.Uair.Composed do
     )
   end
 
-  @spec constraints([pos_integer()], %{pos_integer() => [pos_integer()]}, map()) ::
+  @spec constraints([pos_integer()], %{pos_integer() => [pos_integer()]}, %{
+          row() => pos_integer()
+        }) ::
           [Ast.pred()]
-  defp constraints(dynamic, bits, lower) do
+  defp constraints(dynamic, bits, rows) do
     Enum.flat_map(dynamic, fn a ->
       cube_index = Ast.add(Ast.len(), Ast.mul(Ast.cell(a), -1))
 
       spelled(Map.fetch!(bits, a), cube_index) ++
-        [Ast.eq(Ast.cell(Map.fetch!(lower, a)), Ast.add(Ast.cell(a), -1))]
+        [Ast.eq(Ast.cell(rows[{:lower, a}]), Ast.add(Ast.cell(a), -1))]
     end)
   end
 
-  @spec rewrite(Ast.pred(), [Ast.pred()], %{{pos_integer(), pos_integer()} => pos_integer()}) ::
+  # Pointer bounds hold for every alternative, so conjoin them once.
+  @spec rewrite(Ast.pred(), [Ast.pred()], %{row() => pos_integer()}) ::
           Ast.pred()
   defp rewrite(pred, constraints, results) do
     pred
-    |> Ast.branches()
-    |> Enum.map(fn branch ->
-      parts =
-        branch
-        |> Ast.postwalk(fn node ->
-          case Ast.read(node) do
-            {i, {:at, {:cell, j}, 1, 0}} when is_map_key(results, {i, j}) ->
-              Ast.cell(results[{i, j}])
+    |> Ast.postwalk(fn node ->
+      case Ast.read(node) do
+        {i, {:at, {:cell, j}, 1, 0}} when is_map_key(results, {i, j}) ->
+          Ast.cell(results[{i, j}])
 
-            _other ->
-              node
-          end
-        end)
-        |> Ast.conjuncts()
-
-      Ast.conj(parts ++ constraints)
+        _other ->
+          node
+      end
     end)
-    |> Ast.disj()
+    |> then(&Ast.conj([&1 | constraints]))
   end
 
-  @spec extend(
-          Interpretation.t(),
-          [pos_integer()],
-          [{pos_integer(), pos_integer()}],
-          pos_integer()
-        ) :: Interpretation.t()
-  defp extend(witness, dynamic, pairs, mu) do
-    len = Interpretation.len(witness)
+  @spec value(row(), Interpretation.t(), pos_integer()) :: integer()
+  defp value({:bit, a, nu}, witness, x),
+    do: (Interpretation.len(witness) - Interpretation.at(witness, a, x)) |> bsr(nu) |> band(1)
 
-    bit_rows =
-      for a <- dynamic, nu <- 1..mu do
-        for x <- 1..len, do: (len - Interpretation.at(witness, a, x)) |> bsr(nu - 1) |> band(1)
-      end
+  defp value({:lower, a}, witness, x), do: Interpretation.at(witness, a, x) - 1
 
-    result_rows =
-      for {i, a} <- pairs do
-        for x <- 1..len, do: Interpretation.at(witness, i, Interpretation.at(witness, a, x))
-      end
-
-    lower_rows =
-      for a <- dynamic,
-          do: for(x <- 1..len, do: Interpretation.at(witness, a, x) - 1)
-
-    Interpretation.new(Interpretation.rows(witness) ++ bit_rows ++ lower_rows ++ result_rows)
-  end
+  defp value({i, a}, witness, x),
+    do: Interpretation.at(witness, i, Interpretation.at(witness, a, x))
 end
