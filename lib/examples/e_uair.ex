@@ -128,8 +128,13 @@ defmodule Examples.EUair do
         values = Enum.to_list(1..len)
         pointers = tl(values) ++ [1]
         witness = Interpretation.new([values, pointers, pointers])
-        {:ok, uair} = Uair.emit(Ast.eq(Ast.cell(1, 2), Ast.cell(3)), witness)
+        pred = Ast.eq(Ast.cell(1, 2), Ast.cell(3))
+        {:ok, uair} = Uair.emit(pred, witness)
         assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair)
+
+        {:ok, alternatives} = Uair.emit(Ast.disj([pred, Ast.eq(Ast.cell(3), 0)]), witness)
+        assert alternatives.degree == 4
+        assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(alternatives)
         uair
       end
 
@@ -445,5 +450,4 @@ defmodule Examples.EUair do
     assert {:error, _reason} = Prover.prove_uair(forged)
     forged
   end
-
 end

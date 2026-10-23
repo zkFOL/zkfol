@@ -134,7 +134,7 @@ defmodule Zkfol.Uair do
 
     with :ok <- claimed(claims, witness),
          :ok <- models(pred, witness),
-         pred = guarded(pred, len),
+         pred = at_branches(pred, &guard(&1, len)),
          {pred, witness} = sorted_copies({pred, witness}) |> bounded_expressions(),
          obligations = obligations(pred),
          named = Enum.flat_map(obligations, &Ast.reads/1),
@@ -145,10 +145,11 @@ defmodule Zkfol.Uair do
          pointed = Enum.flat_map(Ast.pointer_derefs(pred), &Tuple.to_list/1),
          {pred, witness, laid_public} = twinned(pred, witness, public, pointed ++ named),
          {:ok, pred, witness, lowering} <- Composed.lower(pred, witness, num_vars(len)),
-         bounded = naturals(obligations) ++ Composed.bounded_rows(lowering),
+         bounded = naturals(obligations) ++ lowering.bounded,
          {pred, witness, limbs} = limbed(pred, witness, bounded),
          poly = polynomial(pred, len),
-         unread = named ++ Composed.value_rows(lowering) ++ Enum.map(ties, &elem(&1, 0)),
+         unread =
+           named ++ Enum.map(lowering.reads, & &1.value_row) ++ Enum.map(ties, &elem(&1, 0)),
          rows = layout(poly, laid_public, unread),
          cols = rows |> Enum.with_index() |> Map.new(),
          shifts = shifts(poly, cols),
@@ -185,10 +186,11 @@ defmodule Zkfol.Uair do
   #                         The rows                         #
   ############################################################
 
+  @doc "I append the rows computed for each leaf and return their witness row numbers."
   @spec rowed(Interpretation.t(), [leaf], (leaf, pos_integer() -> integer())) ::
           {Interpretation.t(), %{leaf => pos_integer()}}
         when leaf: var
-  defp rowed(witness, leaves, value) do
+  def rowed(witness, leaves, value) do
     columns = 1..Interpretation.len(witness)
     rows = Enum.map(leaves, fn leaf -> Enum.map(columns, &value.(leaf, &1)) end)
 
@@ -276,13 +278,7 @@ defmodule Zkfol.Uair do
         Ast.eq(Ast.at(row, :x, 1, back), Enum.reduce(weighted, &Ast.add(&2, &1)))
       end
 
-    pred =
-      pred
-      |> Ast.branches()
-      |> Enum.map(&Ast.conj(Ast.conjuncts(&1) ++ spellings))
-      |> Ast.disj()
-
-    {pred, witness, limbs}
+    {Ast.conj([pred | spellings]), witness, limbs}
   end
 
   @spec limb({pos_integer(), non_neg_integer()}, Interpretation.t(), pos_integer()) ::
@@ -317,25 +313,26 @@ defmodule Zkfol.Uair do
     aimed = for {{:aimed, address}, row} <- rows, into: %{}, do: {row, address}
 
     pred =
-      Ast.postwalk(pred, fn
-        {:conj, parts} ->
-          {:conj, parts ++ pins(parts, aimed)}
-
-        {:disj, branches} ->
-          {:disj, Enum.map(branches, &pin_branch(&1, aimed))}
-
-        node ->
-          with {i, _address} = read <- Ast.read(node),
-               leaf when is_map_key(rows, leaf) <- kind(read, len) do
-            case leaf do
-              {:tie, _cell} -> Ast.cell(rows[leaf])
-              {:aimed, _address} -> Ast.cell(i, rows[leaf])
-            end
-          else
-            _in_place -> node
+      Ast.postwalk(pred, fn node ->
+        with {i, _address} = read <- Ast.read(node),
+             leaf when is_map_key(rows, leaf) <- kind(read, len) do
+          case leaf do
+            {:tie, _cell} -> Ast.cell(rows[leaf])
+            {:aimed, _address} -> Ast.cell(i, rows[leaf])
           end
+        else
+          _in_place -> node
+        end
       end)
-      |> pin_branch(aimed)
+      |> at_branches(fn branch ->
+        pins =
+          for {_i, {:at, {:cell, row}, _mul, _add}} <- local_reads(branch),
+              is_map_key(aimed, row),
+              uniq: true,
+              do: Ast.eq(Ast.cell(row), Ast.naming(aimed[row]))
+
+        Ast.conj([branch | pins])
+      end)
 
     ties = for {{:tie, {i, c}}, row} <- rows, do: {i, c, row}
     {pred, witness, ties}
@@ -348,39 +345,31 @@ defmodule Zkfol.Uair do
   defp held({:aimed, address}, witness, x, len),
     do: address |> Semantics.column(witness, x) |> max(1) |> min(len)
 
-  @spec pin_branch(Ast.pred(), %{pos_integer() => Ast.address()}) :: Ast.pred()
-  defp pin_branch(branch, aimed) do
-    case pins([branch], aimed) do
-      [] -> branch
-      pins -> Ast.conj([branch | pins])
-    end
+  @spec at_branches(Ast.pred(), (Ast.pred() -> Ast.pred())) :: Ast.pred()
+  defp at_branches(pred, fun) do
+    pred
+    |> Ast.postwalk(fn
+      {:disj, branches} -> {:disj, Enum.map(branches, fun)}
+      node -> node
+    end)
+    |> fun.()
   end
 
-  @spec pins([Ast.pred()], %{pos_integer() => Ast.address()}) :: [Ast.pred()]
-  defp pins(parts, aimed) do
-    for part <- parts,
-        not match?({tag, _preds} when tag in [:conj, :disj], part),
-        {_i, {:at, {:cell, row}, _mul, _add}} <- reads(part),
-        is_map_key(aimed, row),
-        uniq: true,
-        do: Ast.eq(Ast.cell(row), Ast.naming(aimed[row]))
+  # Alternatives handle their own reads. Inside a term, reify needs the whole value.
+  @spec local_reads(Ast.pred()) :: [Ast.read()]
+  defp local_reads(branch) do
+    for part <- Ast.conjuncts(branch),
+        not match?({:disj, _}, part),
+        read <- reads(part),
+        do: read
   end
 
   # A branch reading b columns back is undefined at x <= b, where the backend would read
   # the padding, so it holds only where `past/2` says that column is in the trace.
-  @spec guarded(Ast.pred(), pos_integer()) :: Ast.pred()
-  defp guarded(pred, len) do
-    pred
-    |> Ast.postwalk(fn
-      {:disj, branches} -> {:disj, Enum.map(branches, &guard(&1, len))}
-      node -> node
-    end)
-    |> guard(len)
-  end
-
   @spec guard(Ast.pred(), pos_integer()) :: Ast.pred()
   defp guard(branch, len) do
-    b = back(branch)
+    shifts = for {_i, {:at, :x, 1, add}} <- local_reads(branch), add < 0, do: -add
+    b = Enum.max(shifts, fn -> 0 end)
 
     if b < least(branch),
       do: branch,
@@ -400,17 +389,6 @@ defmodule Zkfol.Uair do
     |> Enum.max()
   end
 
-  # A disjunction's branches guard their own reads, unless it sits in a term, where its
-  # value counts and not only whether it holds.
-  @spec back(Ast.pred() | Ast.term_t()) :: non_neg_integer()
-  defp back({:disj, _branches}), do: 0
-  defp back({:reify, phi}), do: Ast.reduce(phi, 0, &max(behind(&1), &2))
-  defp back(node), do: Enum.reduce(Ast.children(node), behind(node), &max(back(&1), &2))
-
-  @spec behind(Ast.pred() | Ast.term_t()) :: non_neg_integer()
-  defp behind({:cell, _i, {:at, :x, 1, add}}) when add < 0, do: -add
-  defp behind(_node), do: 0
-
   # Lookups and pointers range over private columns only, so a claimed row they touch
   # hands its claim to a copy.
   @spec twinned(Ast.pred(), Interpretation.t(), [pos_integer()], [pos_integer()]) ::
@@ -420,13 +398,7 @@ defmodule Zkfol.Uair do
     {witness, twins} = rowed(witness, claimed, &Interpretation.at(witness, &1, &2))
     bonds = for {i, twin} <- twins, do: Ast.eq(Ast.cell(twin), Ast.cell(i))
 
-    pred =
-      if bonds == [],
-        do: pred,
-        else:
-          pred |> Ast.branches() |> Enum.map(&Ast.conj(Ast.conjuncts(&1) ++ bonds)) |> Ast.disj()
-
-    {pred, witness, Enum.map(public, &Map.get(twins, &1, &1))}
+    {Ast.conj([pred | bonds]), witness, Enum.map(public, &Map.get(twins, &1, &1))}
   end
 
   @spec kind(Ast.read(), pos_integer()) :: kind()
