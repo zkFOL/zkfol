@@ -55,8 +55,13 @@ defmodule Zkfol.Phi.Expression do
   @spec callee(term(), [term()], Walk.t(), %{atom() => Zkfol.Lang.Rel.t()}) ::
           {:ok, Zkfol.Lang.Rel.t(), [term()]} | waiting()
   def callee({:var, _} = q, args, walk, scope) do
-    with {:ok, {:rel, p, fixed}} <- resolve(q, walk),
-         do: {:ok, scope[p], fixed ++ args}
+    with {:ok, value} <- resolve(q, walk) do
+      case value do
+        {:rel, p, fixed} -> callee(p, fixed ++ args, walk, scope)
+        {:fresh, ref} -> {:waiting, [ref]}
+        other -> throw({:refused, {:unliftable_term, %{term: other}}})
+      end
+    end
   end
 
   def callee(q, args, _walk, scope),

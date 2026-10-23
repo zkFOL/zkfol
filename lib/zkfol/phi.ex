@@ -665,14 +665,13 @@ defmodule Zkfol.Phi do
   end
 
   @spec occurrence(atom(), Walk.t(), ctx()) :: non_neg_integer()
-  defp occurrence(name, walk, %{site: [k | _], body: body}) do
+  defp occurrence(name, walk, %{site: [k | _], body: body, scope: scope}) do
     Enum.count(Enum.take(body, k), fn
-      {:call, {:var, _} = callback, _args} ->
-        {:rel, called, _fixed} = Expression.resolve!(callback, walk)
-        called == name
-
-      {:call, called, _args} ->
-        called == name
+      {:call, callee, args} ->
+        case Expression.callee(callee, args, walk, scope) do
+          {:ok, %Rel{name: called}, _args} -> called == name
+          waiting -> throw(waiting)
+        end
 
       _goal ->
         false

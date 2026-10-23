@@ -257,7 +257,11 @@ defmodule Zkfol.Lang do
   defp scoped({:call, {_mod, q}, args}, bound, scope), do: scoped({:call, q, args}, bound, scope)
 
   defp scoped({:call, q, args}, bound, scope) do
-    callee = if is_atom(q) and MapSet.member?(bound, q), do: {:var, q}, else: q
+    callee =
+      if is_atom(q) and (MapSet.member?(bound, q) or not MapSet.member?(scope, q)),
+        do: {:var, q},
+        else: q
+
     {:call, callee, for(arg <- args, do: scoped(arg, bound, scope))}
   end
 
