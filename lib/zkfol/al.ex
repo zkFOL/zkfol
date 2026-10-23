@@ -20,10 +20,6 @@ defmodule Zkfol.Al do
   @typedoc "An emitted AL program: goal structs ready for AL.eval/3."
   @type program :: [struct()]
 
-  @typep bind :: %{optional(pos_integer()) => integer()}
-
-  @typep prep :: %{root: Rel.t(), program: program(), bind: bind(), len?: boolean()}
-
   @doc "I am the installed program owned by this ask."
   @spec program(Ask.t()) :: AL.Object.t()
   def program(%Ask{class: class, branch: branch}), do: %AL.Object{id: class, branch: branch.id}
@@ -67,22 +63,25 @@ defmodule Zkfol.Al do
           :question | :derivation
         ) :: {:ok, Ask.t()} | {:error, Refusal.t()}
   defp open(target, arguments, opts, mode) do
-    with {:ok, rels} <- rels(target),
-         arguments = padded(arguments, hd(rels).arity),
+    with {:ok, [root | _rest] = rels} <- rels(target),
+         {:ok, arguments} <- padded(arguments, root.arity),
+         len? = Enum.any?(rels, &mentions_len?(&1.clauses)),
+         :ok <- len_bound(len?, arguments),
          branch = %AL.Branch{id: landing(Keyword.get(opts, :branch))},
          {:atomic, class} = :mnesia.transaction(fn -> AL.Command.fresh_id(branch) end),
-         {:ok, prep} <- prepared(rels, arguments, class, mode),
+         {:ok, program} <-
+           question_program(Enum.map(rels, &implementation(&1, mode)), len?, class, mode),
          heap = Keyword.get(opts, :heap) || @heap,
-         :ok <- install(prep.program, branch, heap) do
+         :ok <- install(program, branch, heap) do
       {:ok,
        %Ask{
          rels: rels,
-         goal: asking(prep, arguments, class),
+         goal: asking(root, arguments, len?, class),
          class: class,
          arguments: arguments,
          branch: branch,
          heap: heap,
-         len?: prep.len?
+         len?: len?
        }}
     end
   end
@@ -137,18 +136,6 @@ defmodule Zkfol.Al do
   defp rels([root = %Rel{} | _rest] = list), do: Lang.reached(root, list)
   defp rels(_none), do: {:error, {:no_relations, %{}}}
 
-  @spec prepared([Rel.t()], [Statement.datum() | :_], atom(), :question | :derivation) ::
-          {:ok, prep()} | {:error, Refusal.t()}
-  defp prepared([root | _rest] = rels, args, class, mode) do
-    len? = Enum.any?(rels, &mentions_len?(&1.clauses))
-
-    with {:ok, program} <-
-           question_program(Enum.map(rels, &implementation(&1, mode)), len?, class, mode),
-         {:ok, bind} <- bind(Enum.to_list(1..root.arity//1), args),
-         :ok <- len_bound(len?, bind),
-         do: {:ok, %{root: root, program: program, bind: bind, len?: len?}}
-  end
-
   # A question can use a native definition; a derivation needs the source calls as well.
   @spec implementation(Rel.t(), :question | :derivation) :: Rel.t()
   defp implementation(rel = %Rel{al: {:definition, al}}, :question),
@@ -158,19 +145,26 @@ defmodule Zkfol.Al do
   defp implementation(rel, _mode), do: rel
 
   # len names the trace, which only a bound count sizes ahead of time.
-  @spec len_bound(boolean(), bind()) :: :ok | {:error, Refusal.t()}
-  defp len_bound(false, _bind), do: :ok
-  defp len_bound(true, bind) when is_map_key(bind, 1), do: :ok
-  defp len_bound(true, _bind), do: {:error, {:len_needs_a_bound_count, %{}}}
+  @spec len_bound(boolean(), [Statement.datum() | :_]) :: :ok | {:error, Refusal.t()}
+  defp len_bound(false, _args), do: :ok
+  defp len_bound(true, [count | _rest]) when not is_atom(count), do: :ok
+  defp len_bound(true, _args), do: {:error, {:len_needs_a_bound_count, %{}}}
 
   # The root call: a bound row's value, a query variable elsewhere, the size last where len asks.
-  @spec asking(prep(), [Statement.datum() | :_], atom()) :: program()
-  defp asking(%{root: root, bind: bind, len?: len?}, arguments, class) do
-    sized = if len?, do: [Map.fetch!(bind, 1)], else: []
+  @spec asking(Rel.t(), [Statement.datum() | :_], boolean(), atom()) :: program()
+  defp asking(root, arguments, len?, class) do
+    args =
+      Enum.with_index(arguments, 1)
+      |> Enum.map(fn
+        {:_, row} -> v(:"qa#{row}")
+        {name, _row} when is_atom(name) -> v(name)
+        {value, _row} -> value
+      end)
+
+    sized = if len?, do: [hd(arguments)], else: []
 
     goal =
-      {method(root.name), [],
-       [class | goal(root.arity, bind, arguments) ++ sized ++ [v(:"$bindings")]]}
+      {method(root.name), [], [class | args ++ sized ++ [v(:"$bindings")]]}
 
     [AL.ast_to_pattern(goal)]
   end
@@ -208,18 +202,13 @@ defmodule Zkfol.Al do
     end
   end
 
-  @spec padded([Statement.datum() | :_], non_neg_integer()) :: [Statement.datum() | :_]
-  defp padded(args, arity) when length(args) >= arity, do: args
-  defp padded(args, arity), do: args ++ List.duplicate(:_, arity - length(args))
+  # An argument past the last row addresses nothing; zipping it away would answer another ask.
+  @spec padded([Statement.datum() | :_], non_neg_integer()) ::
+          {:ok, [Statement.datum() | :_]} | {:error, Refusal.t()}
+  defp padded(args, arity) when length(args) > arity,
+    do: {:error, {:arguments_exceed_rows, %{args: length(args), rows: arity}}}
 
-  @spec goal(pos_integer(), bind(), [integer() | atom()]) :: [Macro.t() | integer()]
-  defp goal(arity, bind, args) do
-    Enum.zip(1..arity//1, Stream.concat(args, Stream.cycle([:_])))
-    |> Enum.map(fn
-      {_row, a} when is_atom(a) and a != :_ -> v(a)
-      {row, _} -> Map.get(bind, row, v(:"qa#{row}"))
-    end)
-  end
+  defp padded(args, arity), do: {:ok, args ++ List.duplicate(:_, arity - length(args))}
 
   # A search stopped by the budget never reached a no, so it refuses as itself.
   @spec outcome(term()) ::
@@ -231,14 +220,6 @@ defmodule Zkfol.Al do
 
   defp outcome({:aborted, reason}), do: {:no, reason}
   defp outcome(exceeded), do: Refusal.from_al(exceeded)
-
-  # An argument past the last row addresses nothing; zipping it away would answer another ask.
-  @spec bind([pos_integer()], [integer() | atom()]) :: {:ok, bind()} | {:error, Refusal.t()}
-  defp bind(rows, args) when length(args) > length(rows),
-    do: {:error, {:arguments_exceed_rows, %{args: length(args), rows: length(rows)}}}
-
-  defp bind(rows, args),
-    do: {:ok, rows |> Enum.zip(args) |> Enum.reject(fn {_row, a} -> is_atom(a) end) |> Map.new()}
 
   @spec question_program([Rel.t()], boolean(), atom(), :question | :derivation) ::
           {:ok, program()} | {:error, Refusal.t()}
