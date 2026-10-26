@@ -132,6 +132,14 @@ struct Request {
 /// Queue the statement and return the id its verdict will answer to.
 #[rustler::nif]
 fn prove_fol(env: Env, request: Request) -> Result<u64, String> {
+    let columns = match &request.cells {
+        Payload::I64(columns) => columns.len(),
+        Payload::Big(columns) => columns.len(),
+        Payload::Huge(columns) => columns.len(),
+    };
+    if request.num_cols != columns || request.num_public > columns {
+        return Err("payload columns do not match the statement".to_string());
+    }
     let program = decode_program(request.program)?;
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     let job = Job {
@@ -155,6 +163,8 @@ fn prove_fol(env: Env, request: Request) -> Result<u64, String> {
         payload: request.cells,
         export: request.export,
     };
+
+    job.statement.validate()?;
 
     JOBS.get_or_init(|| {
         let (jobs, queue) = channel();
@@ -304,7 +314,95 @@ fn run(payload: Payload, statement: Statement, export: Option<String>) -> Result
 }
 
 impl Statement {
+    /// Reject a malformed statement before passing it to the proof backend.
+    fn validate(&self) -> Result<(), String> {
+        let rows = 1usize
+            .checked_shl(
+                self.num_vars
+                    .try_into()
+                    .map_err(|_| "invalid cube dimension".to_string())?,
+            )
+            .ok_or_else(|| "invalid cube dimension".to_string())?;
+        let cols = self.spec.num_cols;
+
+        if cols == 0 || self.spec.num_public > cols {
+            return Err("invalid public column count".to_string());
+        }
+
+        let lengths: Vec<usize> = match &self.public {
+            Payload::I64(columns) => columns.iter().map(Vec::len).collect(),
+            Payload::Big(columns) => columns.iter().map(Vec::len).collect(),
+            Payload::Huge(columns) => columns.iter().map(Vec::len).collect(),
+        };
+        if lengths.len() != self.spec.num_public || lengths.iter().any(|&len| len != rows) {
+            return Err("public columns do not match the statement dimensions".to_string());
+        }
+
+        let mut depth = 0usize;
+        for op in &self.spec.program {
+            match op {
+                Op::Up(col) => {
+                    if *col >= cols {
+                        return Err("program column out of bounds".to_string());
+                    }
+                    depth += 1;
+                }
+                Op::Down(shift) => {
+                    if *shift >= self.spec.shifts.len() {
+                        return Err("program shift out of bounds".to_string());
+                    }
+                    depth += 1;
+                }
+                Op::Const(_) => depth += 1,
+                Op::Add | Op::Mul => {
+                    if depth < 2 {
+                        return Err("program stack underflow".to_string());
+                    }
+                    depth -= 1;
+                }
+            }
+        }
+        if depth != 1 {
+            return Err("program must leave exactly one root".to_string());
+        }
+
+        if self.spec.shifts.iter().any(|&(col, _)| col >= cols)
+            || self.spec.word_lookups.iter().any(|&(col, _)| col >= cols)
+            || self.spec.reads.iter().any(|(value, bits, result)| {
+                *value >= cols || *result >= cols || bits.iter().any(|&col| col >= cols)
+            })
+            || self.spec.point_ties.iter().any(|tie| {
+                tie.column >= cols
+                    || tie.row >= rows
+                    || match &tie.target {
+                        runtime::TieTarget::Broadcast(col) => *col >= cols,
+                    }
+            })
+        {
+            return Err("statement references a column or row out of bounds".to_string());
+        }
+
+        if self.spec.selected.iter().any(|group| {
+            group.columns.iter().any(|&col| col >= cols)
+                || group.selections.iter().flatten().any(|&(slot, row)| {
+                    slot as usize >= group.columns.len() || row as usize >= rows
+                })
+        }) || self.spec.permuted.iter().any(|group| {
+            group.columns.iter().any(|&col| col >= cols)
+                || group.pairs.iter().any(|(left, right)| {
+                    left.iter().chain(right).any(|&(slot, row)| {
+                        slot as usize >= group.columns.len() || row as usize >= rows
+                    })
+                })
+        }) {
+            return Err("lookup selection out of bounds".to_string());
+        }
+
+        Ok(())
+    }
+
     fn verify(self, proof: Proof<F>) -> Result<(), String> {
+        self.validate()?;
         let num_vars = self.num_vars;
         *SPEC.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(self.spec);
 
@@ -326,12 +424,20 @@ impl Statement {
     }
 }
 
-/// Check the proof file against the statement file. A malformed proof panics the decoder.
+/// Check a proof against a trusted statement, rejecting malformed inputs as errors.
 pub fn check(statement: &str, proof: &str) -> Result<(), String> {
     let read = |path: &str| std::fs::read(path).map_err(|e| format!("{path}: {e}"));
     let statement: Statement =
         serde_json::from_slice(&read(statement)?).map_err(|e| format!("{statement}: {e}"))?;
-    statement.verify(Proof::read_transcription_bytes_exact(&read(proof)?))
+    statement.validate()?;
+
+    let bytes = read(proof)?;
+    let proof = catch_unwind(AssertUnwindSafe(|| {
+        Proof::read_transcription_bytes_exact(&bytes)
+    }))
+    .map_err(|_| "invalid proof encoding".to_string())?;
+    catch_unwind(AssertUnwindSafe(|| statement.verify(proof)))
+        .map_err(|_| "proof verifier rejected malformed input".to_string())?
 }
 
 /// The first `n` columns of the payload, the public ones.
@@ -355,6 +461,78 @@ fn pcs_params() -> PcsParams {
         column_openings: NUM_COLUMN_OPENINGS,
         degree: D,
         backend: backend().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn statement() -> Statement {
+        Statement {
+            num_vars: 1,
+            spec: Spec {
+                num_cols: 1,
+                num_public: 1,
+                program: vec![Op::Up(0)],
+                ..Spec::default()
+            },
+            public: Payload::I64(vec![vec![1, 2]]),
+        }
+    }
+
+    #[test]
+    fn accepts_well_formed_statement() {
+        assert!(statement().validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_public_dimensions() {
+        let mut wrong_count = statement();
+        wrong_count.spec.num_public = 2;
+        assert!(wrong_count.validate().is_err());
+
+        let mut wrong_rows = statement();
+        wrong_rows.public = Payload::I64(vec![vec![1]]);
+        assert!(wrong_rows.validate().is_err());
+
+        let mut impossible_cube = statement();
+        impossible_cube.num_vars = usize::BITS as usize;
+        assert!(impossible_cube.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_program() {
+        let mut wrong_column = statement();
+        wrong_column.spec.program = vec![Op::Up(1)];
+        assert!(wrong_column.validate().is_err());
+
+        let mut wrong_shift = statement();
+        wrong_shift.spec.program = vec![Op::Down(0)];
+        assert!(wrong_shift.validate().is_err());
+
+        let mut underflow = statement();
+        underflow.spec.program = vec![Op::Add];
+        assert!(underflow.validate().is_err());
+
+        let mut leftover = statement();
+        leftover.spec.program = vec![Op::Up(0), Op::Const(1)];
+        assert!(leftover.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_lookup_and_tie_positions() {
+        let mut lookup = statement();
+        lookup.spec.word_lookups = vec![(1, 8)];
+        assert!(lookup.validate().is_err());
+
+        let mut tie = statement();
+        tie.spec.point_ties = vec![Tie {
+            column: 0,
+            row: 2,
+            target: runtime::TieTarget::Broadcast(0),
+        }];
+        assert!(tie.validate().is_err());
     }
 }
 
