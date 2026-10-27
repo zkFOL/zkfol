@@ -115,9 +115,6 @@ defmodule Zkfol.Refusal do
   defp said({:arguments_exceed_rows, %{args: args, rows: rows}}),
     do: {:restructure, "#{args} arguments for a relation of #{rows} rows"}
 
-  defp said({:len_needs_a_bound_count, %{}}),
-    do: {:restructure, "len is the trace length, which only a bound count names"}
-
   defp said({:residue, %{answer: answer}}),
     do:
       {:restructure,

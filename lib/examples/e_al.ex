@@ -2,7 +2,7 @@ defmodule Examples.EAl do
   @moduledoc "I am the statement running as clauses: the derivation is the witness."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -12,6 +12,7 @@ defmodule Examples.EAl do
   alias Zkfol.Interpretation
   alias Zkfol.Pipeline
   alias Zkfol.Prover
+  alias Zkfol.Query
   alias Zkfol.Refusal
   alias Zkfol.Statement
   alias Zkfol.Uair
@@ -26,18 +27,82 @@ defmodule Examples.EAl do
   defrel tab(3, 40)
   defrel tab(4, 40)
 
+  @doc "One installed relation accepts successive calls with different arguments."
+  @spec installed_program() :: AL.Object.t()
+  example installed_program do
+    {:ok, program, source} = Al.install(tab(), [1, :_], [])
+
+    for args <- [[1, 10], [3, 40]] do
+      assert {:ok, %AL.JAM.State{}} = Al.invoke(program, %{source | args: args})
+    end
+
+    assert {:no, _reason} = Al.invoke(program, %{source | args: [1, 40]})
+    assert :ok = Al.close(program)
+    program
+  end
+
+  @doc "The installed AL clause keeps a call before the equation that follows it."
+  @spec source_order() :: String.t()
+  example source_order do
+    {:ok, query} = Query.open(pick(), [1, :_], [])
+
+    [_, source] =
+      query.program.id
+      |> AL.Source.method_sources(%AL.Branch{id: query.program.branch})
+      |> Enum.find(fn [name, _source] -> name == "rel:pick" end)
+
+    {:ok, %AL.Syntax.Result{program: [_clear, definition]}} = AL.Syntax.parse(source <> ".")
+    %AL.Goal.Compound{args: [_object, _name, head, body]} = definition
+    assert length(head) == pick().arity + 1
+    [call | _] = body
+    assert length(call.args) == tab().arity + 1
+    assert Enum.map(body, & &1.name) == [Al.method(:tab), :=]
+    assert {:ok, [1, 41]} = Query.next(query)
+    assert :ok = Query.close(query)
+    source
+  end
+
+  @doc "An arithmetic argument stays an AL term; an explicit equation supplies its value."
+  @spec arithmetic_arguments() :: [Query.outcome()]
+  example arithmetic_arguments do
+    expression =
+      rel do
+        expression(x, v) do
+          tab(x + 1, v)
+        end
+      end
+
+    evaluated =
+      rel do
+        evaluated(x, v) do
+          x1 = x + 1
+          tab(x1, v)
+        end
+      end
+
+    for {relation, expected} <- [{expression, :exhausted}, {evaluated, {:ok, [2, 40]}}] do
+      {:ok, query} = Query.open(relation, [2, :_], [])
+      answer = Query.next(query)
+      Query.close(query)
+      assert answer == expected
+      answer
+    end
+  end
+
   defrel odd(1, 1)
 
   defrel odd(x, v) do
     x > 1
-    even(x - 1, v)
+    x1 = x - 1
+    even(x1, v)
   end
 
   defrel even(1, 0)
 
   defrel even(x, v) do
     x > 1
-    odd(x - 1, v)
+    x1 = x - 1
+    odd(x1, v)
   end
 
   defrel pairs(1, 3, 5)
@@ -74,14 +139,16 @@ defmodule Examples.EAl do
 
   defrel forked(x, v) do
     x > 1
-    forked(x - 1, w)
+    x1 = x - 1
+    forked(x1, w)
     v = w + 1
     v < 100
   end
 
   defrel forked(x, v) do
     x > 1
-    forked(x - 1, w)
+    x1 = x - 1
+    forked(x1, w)
     v = w + 10
     v < 1000
   end
@@ -90,12 +157,13 @@ defmodule Examples.EAl do
 
   defrel regsm(x, a, c) do
     x > 1
-    regsm(x - 1, b, a)
-    c = mod(a + b, 7919)
+    x1 = x - 1
+    regsm(x1, b, a)
+    mod(a + b, 7919, c)
   end
 
   defrel shifty(m, x, v) do
-    v = mod(x, m)
+    mod(x, m, v)
   end
 
   defrel collatz_next(x, y) do
@@ -111,7 +179,7 @@ defmodule Examples.EAl do
   @doc "I give two names to the same value, without restricting it to a number."
   @spec variable_alias() :: Zkfol.Lang.Rel.t()
   example variable_alias do
-    rel :variable_alias do
+    rel do
       variable_alias(x, y) do
         y = x
       end
@@ -161,12 +229,13 @@ defmodule Examples.EAl do
   @doc "A value aims the pointer: the call reads the column another row names."
   @spec hop_rel() :: Zkfol.Lang.Rel.t()
   example hop_rel do
-    rel :hop do
+    rel do
       hop(1, 1)
 
       hop(x, v) do
         x > 0
-        hop(v - 1, w)
+        v1 = v - 1
+        hop(v1, w)
         v = w + 1
       end
     end
@@ -296,8 +365,8 @@ defmodule Examples.EAl do
     {:ok, derivation} = Al.derived(collatz_next(), [7], [])
     {:error, reason} = Zkfol.Phi.relaid(Zkfol.Statement.of(collatz_next()), derivation)
 
-    assert {:unbound_variable, %{goals: [{:eq, {:var, :x}, {:add, {:mul, {:var, :k}, 2}, 1}}]}} =
-             reason
+    assert {:unbound_variable, %{goals: goals}} = reason
+    assert {:eq, {:var, :x}, {:add, {:mul, 2, {:var, :k}}, 1}} in goals
 
     assert Refusal.message(reason) =~ "no clause binds"
     reason

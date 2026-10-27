@@ -2,7 +2,7 @@ defmodule Examples.EAlloc do
   @moduledoc "I am the linker's evidence: named predicates resolve to the regions' rows."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -16,7 +16,8 @@ defmodule Examples.EAlloc do
   defrel held(0, 0)
 
   defrel held(n, value) do
-    held(n - 1, previous)
+    n1 = n - 1
+    held(n1, previous)
     value = previous + n
   end
 
@@ -25,7 +26,8 @@ defmodule Examples.EAlloc do
   end
 
   defrel shifted(n, value) do
-    held(n + 1, value)
+    n + 1 = n1
+    held(n1, value)
   end
 
   defrel choose(0) do

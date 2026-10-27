@@ -2,34 +2,36 @@ defmodule Zkfol.Prims do
   @moduledoc """
   I am the library the surface's comparisons, reductions and reads call:
   each is a relation whose body is its meaning, written once.
+  `mod(e, m, r)` keeps its quotient local; comparisons keep their slack local.
   """
 
   use Zkfol.Lang
+  import Zkfol.FOL
 
   @phi {Zkfol.Ast, :natural}
-  @al quote(do: x >= 0)
+  @al ">= X 0"
   defrel natural(x)
 
-  @al quote(do: a > b)
-  defrel gt(a, b, s) do
+  @al "> A B"
+  defrel gt(a, b) do
     a = b + 1 + s
     natural(s)
   end
 
-  @al quote(do: a >= b)
-  defrel gte(a, b, s) do
+  @al ">= A B"
+  defrel gte(a, b) do
     a = b + s
     natural(s)
   end
 
-  @al quote(do: a < b)
-  defrel lt(a, b, s) do
+  @al "< A B"
+  defrel lt(a, b) do
     b = a + 1 + s
     natural(s)
   end
 
-  @al quote(do: a <= b)
-  defrel lte(a, b, s) do
+  @al "<= A B"
+  defrel lte(a, b) do
     b = a + s
     natural(s)
   end
@@ -38,16 +40,17 @@ defmodule Zkfol.Prims do
   defrel nth(1, [v | _], v)
 
   defrel nth(n, [_ | t], v) do
-    nth(n - 1, t, v)
+    n1 = n - 1
+    nth(n1, t, v)
   end
 
   # One branch stands above, the other below: apart either way.
-  defrel neq(a, b, s) do
+  defrel neq(a, b) do
     a = b + 1 + s
     natural(s)
   end
 
-  defrel neq(a, b, s) do
+  defrel neq(a, b) do
     b = a + 1 + s
     natural(s)
   end
@@ -56,7 +59,7 @@ defmodule Zkfol.Prims do
   # The clauses define it for a list the lowering cannot read as cells: each element is
   # absent from the rest.
   @phi {Zkfol.Ast, :distinct}
-  @al {:definition, quote(do: all_dif(cells))}
+  @al {:definition, "all_dif Cells"}
   defrel all_distinct(cells) do
     pairwise(cells)
   end
@@ -71,7 +74,7 @@ defmodule Zkfol.Prims do
   defrel absent(_x, [])
 
   defrel absent(x, [y | ys]) do
-    neq(x, y, _s)
+    neq(x, y)
     absent(x, ys)
   end
 
@@ -84,10 +87,10 @@ defmodule Zkfol.Prims do
   end
 
   # Evaluation only: a free cell takes each value of its domain in turn.
-  @al quote(do: label(x))
+  @al "label X"
   defrel label(x)
 
-  defrel mod(e, m, r, q) do
+  defrel mod(e, m, r) do
     e = m * q + r
     r < m
     natural(r)

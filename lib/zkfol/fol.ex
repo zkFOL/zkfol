@@ -39,11 +39,7 @@ defmodule Zkfol.FOL do
     n = m + 1
   end
 
-  @al {:definition,
-       quote do
-         x >= lo
-         x <= hi
-       end}
+  @al {:definition, ">= X Lo, <= X Hi"}
   defrel between(lo, hi, x) do
     x >= lo
     x <= hi
@@ -72,7 +68,8 @@ defmodule Zkfol.FOL do
   defrel split(0, xs, [], xs)
 
   defrel split(n, [h | t], [h | p], rest) do
-    split(n - 1, t, p, rest)
+    n1 = n - 1
+    split(n1, t, p, rest)
   end
 
   defrel heads([], [], [])

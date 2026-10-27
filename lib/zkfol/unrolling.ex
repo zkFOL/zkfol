@@ -23,7 +23,7 @@ defmodule Zkfol.Unrolling do
   head anchors its length; a call substitutes its source arguments into that equation.
   Only `parameters/6` translates between these lengths and physical columns.
   Unknown or disagreeing evidence leaves a list open for node storage. This analysis
-  reads heads and calls; it does not execute body equations to discover more shapes.
+  reads heads and calls, following local equations that name parameter expressions.
 
   Per call, I decide whether it is unrolled into its clauses or compiled as a member
   (`strategy/4`), and the column a continued or a new member stands at (`frame/2`).
@@ -42,7 +42,7 @@ defmodule Zkfol.Unrolling do
   alias Zkfol.Ast
   alias Zkfol.Lang
   alias Zkfol.Lang.Rel
-  alias Zkfol.Phi.{Layout, Place, Shape, Value}
+  alias Zkfol.Phi.{Expression, Layout, Place, Shape, Value, Walk}
 
   require Place
 
@@ -230,12 +230,39 @@ defmodule Zkfol.Unrolling do
   defp walkable?({:pair, _, _}), do: false
   defp walkable?(_place), do: true
 
+  @spec calls(clause()) :: [Lang.Term.goal()]
+  defp calls({head, body}) do
+    parameters = Lang.Term.names(head)
+
+    {calls, _walk} =
+      Enum.map_reduce(body, %Walk{}, fn
+        {:eq, {:var, name}, value}, walk ->
+          value = Expression.substitute(value, walk)
+
+          walk =
+            if name not in parameters and
+                 Enum.all?(Lang.Term.names(value), &(&1 in parameters)),
+               do: %{walk | env: Map.put(walk.env, name, value)},
+               else: walk
+
+          {nil, walk}
+
+        {:call, name, args}, walk ->
+          {{:call, name, Enum.map(args, &Expression.substitute(&1, walk))}, walk}
+
+        _goal, walk ->
+          {nil, walk}
+      end)
+
+    Enum.reject(calls, &is_nil/1)
+  end
+
   # The first call that moves a parameter.
   @spec displaced_call(clauses()) :: step() | nil
   defp displaced_call(clauses) do
-    Enum.find_value(clauses, fn clause = {head, body} ->
-      Enum.find_value(body, fn
-        call = {:call, q, args} when is_atom(q) ->
+    Enum.find_value(clauses, fn clause = {head, _body} ->
+      Enum.find_value(calls(clause), fn
+        call = {:call, q, args} when is_atom(q) or is_function(q, 0) ->
           Enum.find_value(Enum.with_index(head), fn {pattern, k} ->
             shifts = Enum.map(args, &displaced(&1, pattern))
 
@@ -293,14 +320,15 @@ defmodule Zkfol.Unrolling do
     anchors = for {head, _body} <- clauses, n = Enum.at(head, j), is_integer(n), do: n
 
     bounded =
-      Enum.all?(clauses, fn {head, body} ->
+      Enum.all?(clauses, fn clause = {head, _body} ->
         parameter = Enum.at(head, j)
 
         is_integer(parameter) or
           (match?({:var, _}, parameter) and
-             Enum.any?(body, fn
-               {:call, ^name, args} ->
-                 match?(d when is_integer(d) and d <= 0, displaced(Enum.at(args, j), parameter))
+             Enum.any?(calls(clause), fn
+               {:call, ref, args} ->
+                 Rel.name(ref) == name and
+                   match?(d when is_integer(d) and d <= 0, displaced(Enum.at(args, j), parameter))
 
                _goal ->
                  false
@@ -353,7 +381,7 @@ defmodule Zkfol.Unrolling do
     {head, _body} = selected
 
     proposal =
-      if callee == rel.name,
+      if Rel.name(callee) == rel.name,
         do: {:step, dc, displaced(Enum.at(args, k), Enum.at(head, k))},
         else: {:extent, call_extent(call, head, k, solve)}
 
@@ -361,12 +389,12 @@ defmodule Zkfol.Unrolling do
       for {i, {0, length}} <- solve.extents, carried?(rel, i), into: %{}, do: {i, length}
 
     clauses =
-      for clause = {head, body} <- rel.clauses do
-        if clause == selected and callee != rel.name do
+      for clause = {head, _body} <- rel.clauses do
+        if clause == selected and Rel.name(callee) != rel.name do
           [proposal]
         else
           calls =
-            for {:call, name, args} <- body, name == rel.name do
+            for {:call, name, args} <- calls(clause), Rel.name(name) == rel.name do
               {:step, displaced(Enum.at(args, j), Enum.at(head, j)),
                displaced(Enum.at(args, k), Enum.at(head, k))}
             end
@@ -423,6 +451,8 @@ defmodule Zkfol.Unrolling do
   # may occupy a different argument position; no physical columns enter this equation.
   @spec call_extent(term(), [term()], non_neg_integer(), solve()) :: Shape.extent() | nil
   defp call_extent({:call, q, args}, head, k, solve) do
+    q = Rel.name(q)
+
     with callee = %Rel{} <- solve.scope[q],
          false <- q in solve.seen,
          step = {jc, _delta, _clause, _call} <- displaced_call(callee.clauses),
@@ -455,10 +485,9 @@ defmodule Zkfol.Unrolling do
   # direct self calls can inherit it; each must pass this argument unchanged.
   @spec carried?(Rel.t(), non_neg_integer()) :: boolean()
   defp carried?(%Rel{name: name, clauses: clauses}, i) do
-    Enum.all?(clauses, fn {head, body} ->
-      Enum.all?(body, fn
-        {:call, ^name, args} -> Enum.at(args, i) == Enum.at(head, i)
-        {:call, _callee, _args} -> false
+    Enum.all?(clauses, fn clause = {head, _body} ->
+      Enum.all?(calls(clause), fn
+        {:call, ref, args} -> Rel.name(ref) == name and Enum.at(args, i) == Enum.at(head, i)
         _goal -> true
       end)
     end)

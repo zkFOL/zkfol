@@ -1,7 +1,7 @@
 defmodule Examples.ENodes do
   @moduledoc "I exercise constructed terms across calls, their sharing, and their proof obligations."
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
   import ExUnit.Assertions
 
   alias Examples.EAst

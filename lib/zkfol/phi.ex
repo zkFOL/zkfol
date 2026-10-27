@@ -36,7 +36,7 @@ defmodule Zkfol.Phi do
   alias Zkfol.Ast
   alias Zkfol.Derivation
   alias Zkfol.Lay
-  alias Zkfol.Lang
+  alias Zkfol.Program
   alias Zkfol.Lang.Rel
   alias Zkfol.Phi.Value
   alias Zkfol.Phi.Expression
@@ -132,7 +132,7 @@ defmodule Zkfol.Phi do
   @spec lowered(Rel.t(), [Rel.t()] | nil, [term()], keyword()) ::
           {:ok, Ast.pred(), Alloc.t(), Walk.t()} | {:error, Refusal.t()}
   defp lowered(root, rels, args, opts) do
-    with {:ok, [root | _rest] = reached} <- Lang.reached(root, rels || [root]) do
+    with {:ok, [root | _rest] = reached} <- Program.reached(root, rels || [root]) do
       compiled(root, Map.new(reached, &{&1.name, &1}), args, Keyword.get(opts, :unrolling, true))
     end
   end
@@ -153,7 +153,7 @@ defmodule Zkfol.Phi do
 
     ctx = %{
       scope: scope,
-      recursive: Lang.recursive(Map.values(scope)),
+      recursive: Program.recursive(Map.values(scope)),
       ancestors: [],
       taken: MapSet.new(),
       member: nil,
@@ -436,10 +436,10 @@ defmodule Zkfol.Phi do
       case q do
         {:var, _r} ->
           {:rel, p, fixed} = Expression.resolve!(q, walk)
-          {ctx.scope[p], fixed ++ args}
+          {ctx.scope[Rel.name(p)], fixed ++ args}
 
         _name ->
-          {ctx.scope[q] || throw({:refused, {:relation_not_in_scope, %{relation: q}}}), args}
+          {Map.fetch!(ctx.scope, Rel.name(q)), args}
       end
 
     cond do
@@ -688,10 +688,10 @@ defmodule Zkfol.Phi do
     Enum.count(Enum.take(body, k), fn
       {:call, {:var, _} = callback, _args} ->
         {:rel, called, _fixed} = Expression.resolve!(callback, walk)
-        called == name
+        Rel.name(called) == name
 
       {:call, called, _args} ->
-        called == name
+        Rel.name(called) == name
 
       _goal ->
         false
@@ -866,9 +866,14 @@ defmodule Zkfol.Phi do
         value = Expression.substitute(value, walk)
 
         cond do
-          value == {:var, v} -> walk
-          v in Lang.Term.names(value) -> throw({:refused, {:unbound_variable, %{variable: v}}})
-          true -> %{walk | env: Map.put(env, v, value)}
+          value == {:var, v} ->
+            walk
+
+          v in Zkfol.Lang.Term.names(value) ->
+            throw({:refused, {:unbound_variable, %{variable: v}}})
+
+          true ->
+            %{walk | env: Map.put(env, v, value)}
         end
     end
   end
@@ -907,7 +912,7 @@ defmodule Zkfol.Phi do
   defp unify({:cons, _h, _t} = bracket, {:fresh, ref}, walk = %Walk{env: env})
        when not is_map_key(env, ref) do
     extent =
-      case Lang.Term.closed(bracket) do
+      case Zkfol.Lang.Term.closed(bracket) do
         nil -> {1, 0}
         elements -> {0, length(elements)}
       end

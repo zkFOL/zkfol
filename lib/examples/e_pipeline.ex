@@ -56,5 +56,5 @@ defmodule Examples.EPipeline do
 
   @spec entered(Statement.t()) :: Statement.t()
   defp entered(source = %Statement{rels: [root | _rest] = rels}),
-    do: with({:ok, reached} <- Zkfol.Lang.reached(root, rels), do: %{source | rels: reached})
+    do: with({:ok, reached} <- Zkfol.Program.reached(root, rels), do: %{source | rels: reached})
 end

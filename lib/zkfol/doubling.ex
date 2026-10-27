@@ -10,6 +10,8 @@ defmodule Zkfol.Doubling do
 
   @behaviour Zkfol.Pipeline
 
+  import Zkfol.Prims, only: [mod: 0]
+
   alias Zkfol.Al
   alias Zkfol.Facts
   require Zkfol.Lang
@@ -23,10 +25,9 @@ defmodule Zkfol.Doubling do
   def run(statement = %Statement{rels: [root | _rest], args: [n | args]}, opts)
       when is_integer(n) and length(args) <= 1 do
     with {:ok, [root = %Rel{al: nil, phi: nil} | helpers]} <-
-           Zkfol.Lang.reached(root, statement.rels),
+           Zkfol.Program.reached(root, statement.rels),
          {:ok, descriptor} <- Facts.of(root),
-         canonical = %{root | home: nil},
-         {:ok, [_root | ^helpers]} <- Zkfol.Lang.reached(canonical, [canonical]),
+         {:ok, [_root | ^helpers]} <- Zkfol.Program.reached(root, [root]),
          true <- descriptor.modulus == nil or natural?(descriptor.coefficients) do
       rewritten(descriptor, n, List.first(args, :_), named(statement, opts))
     else
@@ -72,7 +73,7 @@ defmodule Zkfol.Doubling do
           {:ok, Statement.t()} | {:error, Refusal.t()}
   defp trivial(value, result, opts) do
     one =
-      Zkfol.Lang.rel :one do
+      Zkfol.Lang.rel do
         one(1, ^value)
       end
 
@@ -115,14 +116,15 @@ defmodule Zkfol.Doubling do
 
   @spec kernel(Facts.t()) :: Rel.t()
   defp kernel(%Facts{coefficients: {p, q}, base: [{_, x1}, {_, x2}], modulus: nil}) do
-    Zkfol.Lang.rel :kernel do
+    Zkfol.Lang.rel do
       kernel(1, 1, ^p, 1, ^(x2 * p + q * x1))
 
       kernel(x, u, w, e, r) do
         x > 1
         e = 2 * ee + 0
         r = ^x2 * w + ^(q * x1) * u
-        kernel(x - 1, uu, ww, ee, _rr)
+        x1 = x - 1
+        kernel(x1, uu, ww, ee, _rr)
         u = uu * (2 * ww + ^(-p) * uu)
         w = ^q * (uu * uu) + ww * ww
       end
@@ -131,7 +133,8 @@ defmodule Zkfol.Doubling do
         x > 1
         e = 2 * ee + 1
         r = ^x2 * w + ^(q * x1) * u
-        kernel(x - 1, uu, ww, ee, _rr)
+        x1 = x - 1
+        kernel(x1, uu, ww, ee, _rr)
         u = ^q * (uu * uu) + ww * ww
         w = ^p * u + ^q * (uu * (2 * ww + ^(-p) * uu))
       end
@@ -142,25 +145,27 @@ defmodule Zkfol.Doubling do
   defp kernel(descriptor = %Facts{coefficients: {p, q}, base: [{_, x1}, {_, x2}], modulus: mod}) do
     [_x, u0, w0, _e, r0] = base(descriptor)
 
-    Zkfol.Lang.rel :kernel do
+    Zkfol.Lang.rel do
       kernel(1, ^u0, ^w0, 1, ^r0)
 
       kernel(x, u, w, e, r) do
         x > 1
         e = 2 * ee + 0
-        kernel(x - 1, uu, ww, ee, _rr)
-        u = mod(uu * (2 * ww + ^(p * mod) + ^(-p) * uu), ^mod)
-        w = mod(^q * (uu * uu) + ww * ww, ^mod)
-        r = mod(^x2 * w + ^(q * x1) * u, ^mod)
+        x1 = x - 1
+        kernel(x1, uu, ww, ee, _rr)
+        mod(uu * (2 * ww + ^(p * mod) + ^(-p) * uu), ^mod, u)
+        mod(^q * (uu * uu) + ww * ww, ^mod, w)
+        mod(^x2 * w + ^(q * x1) * u, ^mod, r)
       end
 
       kernel(x, u, w, e, r) do
         x > 1
         e = 2 * ee + 1
-        kernel(x - 1, uu, ww, ee, _rr)
-        u = mod(^q * (uu * uu) + ww * ww, ^mod)
-        w = mod(^p * u + ^q * (uu * (2 * ww + ^(p * mod) + ^(-p) * uu)), ^mod)
-        r = mod(^x2 * w + ^(q * x1) * u, ^mod)
+        x1 = x - 1
+        kernel(x1, uu, ww, ee, _rr)
+        mod(^q * (uu * uu) + ww * ww, ^mod, u)
+        mod(^p * u + ^q * (uu * (2 * ww + ^(p * mod) + ^(-p) * uu)), ^mod, w)
+        mod(^x2 * w + ^(q * x1) * u, ^mod, r)
       end
     end
   end

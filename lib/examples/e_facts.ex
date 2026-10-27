@@ -2,7 +2,7 @@ defmodule Examples.EFacts do
   @moduledoc "I am the facts' evidence: the descriptor read off the clauses, or the refusal."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
   import ExUnit.Assertions
 
   alias Examples.EUser
@@ -14,7 +14,8 @@ defmodule Examples.EFacts do
 
   defrel factorial(x, v) do
     x > 2
-    factorial(x - 1, v1)
+    x1 = x - 1
+    factorial(x1, v1)
     v = x * v1
   end
 
@@ -22,17 +23,21 @@ defmodule Examples.EFacts do
   defrel reduced(2, 1)
 
   defrel reduced(x, v) do
-    reduced(x - 1, a)
-    reduced(x - 2, b)
-    v = mod(a + b, 1000)
+    x1 = x - 1
+    reduced(x1, a)
+    x2 = x - 2
+    reduced(x2, b)
+    mod(a + b, 1000, v)
   end
 
   defrel entangled(1, 1)
   defrel entangled(2, 1)
 
   defrel entangled(x, v) do
-    entangled(x - 1, a)
-    entangled(x - 2, b)
+    x1 = x - 1
+    entangled(x1, a)
+    x2 = x - 2
+    entangled(x2, b)
     v = a * b
   end
 

@@ -25,7 +25,7 @@ them; do not rely on paraphrase (they evolve):
   The NIF build is slow; avoid needless recompiles.
 - `mix test` — runs the examples as tests (`test/examples_test.exs` wires each
   `Examples.E<Module>` in via `use ExExample.ExUnit`).
-- `mix dialyzer` — type check (config in `.dialyzer_ignore.exs`).
+- `mix dialyzer` — type check.
 - `mix format` — 98-char lines; run before finalizing.
 - One-off: `MIX_ENV=test timeout 60 mix run -e 'Examples.EFacts.factorial()'` (never
   `--no-halt`; dev's mnesia store belongs to the live GT node). The test env lands
@@ -39,9 +39,13 @@ A `Zkfol.Statement` flows through a `Zkfol.Pipeline` of passes (each `{module, o
 its stage a sum-type — `Raw` → `Derived` → `Solved`. Evaluation needs no Φ and
 stops at `Derived`; only proving needs the lowering, which is why it runs last:
 
-- `Zkfol.Lang` — the relational surface: `defrel`/`rel` macros → a predicate (`Ast`).
-  As the last pass it lowers the run's relations and lays its derivation on the
-  allocation born of that (`Al.relaid`), reaching `Solved`.
+- `Zkfol.Lang` — the relational surface: separate `defrel` clauses generate module
+  constructors; `rel do ... end` constructs a relation directly. Calls use Elixir
+  references, passed relations use `r()`, and head parameters can be called as `r(x)`. `use Zkfol`
+  imports the syntax and standard library; `use Zkfol.Lang` imports only the syntax.
+- `Zkfol.Program` collects referenced definitions and identifies recursive members.
+  `Zkfol.Phi` is the last pass: it lowers relations and lays the derivation on their
+  allocation, reaching `Solved`.
 - `Zkfol.Al` — the AL backend: runs the statement as clauses, the derivation IS the
   witness (judged by the oracle). `derived/3` is the run half, `relaid/2` the link
   half, `solved/3` both in one call. A free count asks the *question* first — the clauses

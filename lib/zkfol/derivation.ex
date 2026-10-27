@@ -8,6 +8,9 @@ defmodule Zkfol.Derivation do
 
   use TypedStruct
 
+  alias Zkfol.Al
+  alias Zkfol.Lang.{Rel, Term}
+
   @typedoc "One established fact: the relation and its ground tuple."
   @type fact :: {atom(), [term()]}
 
@@ -23,13 +26,19 @@ defmodule Zkfol.Derivation do
   I am the derivation AL's journal carries, deduplicated, callees ahead of their callers;
   each fact sits beside what its calls consumed and the seq that established it.
   """
-  @typedoc "The relations by the method each is installed as: its name and arity."
-  @type methods :: %{atom() => {atom(), non_neg_integer()}}
+  @typedoc "The source relations by their installed AL method names."
+  @type methods :: %{atom() => Rel.t()}
 
-  @spec of(AL.t(), methods(), boolean()) :: t()
-  def of(%AL{domino: %{trace: trace}, active_choicepoint: %{store: store}}, names, len?) do
-    tree = trace |> Enum.reverse() |> AL.Trace.derivation_tree(store)
-    nodes = tree |> List.wrap() |> Enum.flat_map(&walk(&1, names, len?, store))
+  @spec of(AL.JAM.State.t(), [Rel.t()]) :: t()
+  def of(state = %AL.JAM.State{active_choicepoint: %{store: store}}, rels) do
+    names = Map.new(rels, &{Al.method(&1.name), &1})
+
+    nodes =
+      state
+      |> AL.Trace.derivation_tree()
+      |> calls()
+      |> Enum.flat_map(&walk(&1, names, store))
+
     facts = nodes |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
     digested = Map.new(nodes)
     ran = for fact <- facts, do: {fact, Map.fetch!(digested, fact)}
@@ -61,45 +70,61 @@ defmodule Zkfol.Derivation do
   @spec consumption(t()) :: [{fact(), [fact()]}]
   def consumption(%__MODULE__{consumed: consumed}), do: consumed
 
-  @spec walk(map(), methods(), boolean(), map()) :: [
+  # A call is a method node beside the answer it gave: the clause chosen, what it derived and
+  # the nodes beneath. Every other node only holds calls.
+  @spec calls([map()]) :: [{term(), map()}]
+  defp calls(nodes) do
+    Enum.flat_map(nodes, fn
+      %{kind: :method, label: label, children: answers} -> for a <- answers, do: {label, a}
+      %{children: kids} -> calls(kids)
+    end)
+  end
+
+  @spec walk({term(), map()}, methods(), map()) :: [
           {fact(), {[fact()], non_neg_integer() | nil, %{atom() => term()}}}
         ]
-  defp walk(node = %{label: label, children: kids}, names, len?, store) do
-    below = Enum.flat_map(kids, &walk(&1, names, len?, store))
+  defp walk({label, answer}, names, store) do
+    kids = calls(answer.children)
+    below = Enum.flat_map(kids, &walk(&1, names, store))
 
-    if fact?(label, names, len?) do
+    if fact?(label, names) do
       consumed =
-        for %{label: kid_label} = kid <- kids,
-            fact?(kid_label, names, len?),
-            do: fact_of(kid, names, store)
+        for {kid, kid_answer} <- kids,
+            fact?(kid, names),
+            do: fact_of(kid, kid_answer.derived, names, store)
 
-      {_self, _method, args} = label
-      bindings = args |> List.last() |> resolved(node.derived) |> AL.Var.subst(store)
-      below ++ [{fact_of(node, names, store), {consumed, node.clause, bindings}}]
+      {_self, method, _args} = label
+      {head, body} = names[method].clauses |> Enum.at(answer.clause)
+
+      bindings =
+        Map.new(Term.names(head ++ body), fn name ->
+          {name, answer.bindings |> Map.fetch!(Al.var(name)) |> AL.Var.subst(store)}
+        end)
+
+      below ++
+        [{fact_of(label, answer.derived, names, store), {consumed, answer.clause, bindings}}]
     else
       below
     end
   end
 
-  defp walk(_node, _names, _len?, _store), do: []
-
   # I match a journal node to a relation by its method name and arity.
-  @spec fact?(term(), methods(), boolean()) :: boolean()
-  defp fact?({_self, m, args}, names, len?) do
+  @spec fact?(term(), methods()) :: boolean()
+  defp fact?({_self, m, args}, names) do
     case Map.get(names, m) do
-      {_name, arity} -> arity == length(args) - 1 - if(len?, do: 1, else: 0)
+      %Rel{arity: arity} -> arity == length(args)
       nil -> false
     end
   end
 
-  defp fact?(_label, _names, _len?), do: false
+  defp fact?(_label, _names), do: false
 
-  @spec fact_of(map(), methods(), map()) :: fact()
-  defp fact_of(%{label: {_self, m, args}, derived: derived}, names, store) do
-    {name, arity} = Map.fetch!(names, m)
+  @spec fact_of(term(), map() | nil, methods(), map()) :: fact()
+  defp fact_of({_self, m, args}, derived, names, store) do
+    %Rel{name: name} = Map.fetch!(names, m)
 
     values =
-      for arg <- Enum.take(args, arity), do: arg |> resolved(derived) |> AL.Var.subst(store)
+      for arg <- args, do: arg |> resolved(derived) |> AL.Var.subst(store)
 
     {name, values}
   end

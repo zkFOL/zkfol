@@ -2,7 +2,7 @@ defmodule Examples.EPhi do
   @moduledoc "I am the lowering's evidence: inlined calls keep their locals, aliases and goal order."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -27,7 +27,7 @@ defmodule Examples.EPhi do
   end
 
   defrel local_calls(x, y) do
-    each([x, y], local_factor)
+    each([x, y], local_factor())
   end
 
   defrel repeated_calls(x, y) do
@@ -79,17 +79,18 @@ defmodule Examples.EPhi do
   end
 
   defrel wrapped_calls(n, direct, first, second) do
-    held(n, direct)
-    delegated(n + 1, first)
-    delegated(n + 1, second)
+    EAlloc.held(n, direct)
+    n1 = n + 1
+    EAlloc.delegated(n1, first)
+    EAlloc.delegated(n1, second)
   end
 
   @spec recursive_relations() :: MapSet.t(atom())
   example recursive_relations do
     {:ok, relations} =
-      Zkfol.Lang.reached(wrapped_calls(), [wrapped_calls(), EAlloc.delegated(), EAlloc.held()])
+      Zkfol.Program.reached(wrapped_calls(), [wrapped_calls(), EAlloc.delegated(), EAlloc.held()])
 
-    recursive = Zkfol.Lang.recursive(relations)
+    recursive = Zkfol.Program.recursive(relations)
     assert recursive == MapSet.new([:held])
     recursive
   end
@@ -108,13 +109,13 @@ defmodule Examples.EPhi do
   end
 
   defrel division_calls(0, m, x, first, second) do
-    first = mod(x, m)
-    second = mod(x + 1, m)
+    mod(x, m, first)
+    mod(x + 1, m, second)
   end
 
   defrel division_calls(1, m, x, first, second) do
-    first = mod(x + 2, m)
-    second = mod(x + 3, m)
+    mod(x + 2, m, first)
+    mod(x + 3, m, second)
   end
 
   @doc "The quotients stay local to the calls, and mod needs no member to fill them."
@@ -177,7 +178,8 @@ defmodule Examples.EPhi do
 
   defrel selected_record(n, [row, next | tail], first, second) do
     n > 1
-    selected_record(n - 1, [next | tail], _first, _second)
+    n1 = n - 1
+    selected_record(n1, [next | tail], _first, _second)
     first = second
     second = next
     record_pair(row)
