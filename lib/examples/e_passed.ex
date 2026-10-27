@@ -2,7 +2,7 @@ defmodule Examples.EPassed do
   @moduledoc "I am the passed reading's evidence: a prim reads the same through a handed name."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -15,7 +15,7 @@ defmodule Examples.EPassed do
   alias Zkfol.Statement
 
   defrel counted(xs) do
-    each(xs, natural)
+    each(xs, natural())
   end
 
   @spec passed_reading() :: Statement.t()
@@ -226,7 +226,7 @@ defmodule Examples.EPassed do
   end
 
   defrel combined(xs, sum) do
-    with_total(xs, total, sum)
+    with_total(xs, total(), sum)
   end
 
   defrel with_total(xs, f, sum) do

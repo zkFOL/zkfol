@@ -5,7 +5,7 @@ defmodule Examples.EBench do
   """
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   alias Examples.EAl
   alias Examples.EDoubling
