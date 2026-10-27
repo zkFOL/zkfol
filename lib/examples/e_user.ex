@@ -25,8 +25,10 @@ defmodule Examples.EUser do
 
   defrel fib(x, v) do
     x > 2
-    fib(x - 1, v1)
-    fib(x - 2, v2)
+    x1 = x - 1
+    fib(x1, v1)
+    x2 = x - 2
+    fib(x2, v2)
     v = v1 + v2
   end
 
@@ -39,7 +41,8 @@ defmodule Examples.EUser do
 
   defrel regs(x, a, b) do
     x > 1
-    regs(x - 1, a1, b1)
+    x1 = x - 1
+    regs(x1, a1, b1)
     a = a1 + b1
     b = a1
   end
@@ -48,7 +51,8 @@ defmodule Examples.EUser do
 
   defrel regsm(x, a, b, q) do
     x > 1
-    regsm(x - 1, a1, b1, q1)
+    x1 = x - 1
+    regsm(x1, a1, b1, q1)
     a1 + b1 = q * 7919 + a
     a < 7919
     a + 1 > 0
@@ -60,7 +64,8 @@ defmodule Examples.EUser do
 
   defrel offset(x, v) do
     x > 1
-    offset(x - 1, w)
+    x1 = x - 1
+    offset(x1, w)
     v = w + 5
   end
 
@@ -78,7 +83,8 @@ defmodule Examples.EUser do
 
       power(x, b, e, v) do
         x > 1
-        power(x - 1, bb, ee, w)
+        x1 = x - 1
+        power(x1, bb, ee, w)
         b = bb
         e = ee + 1
         v = b * w
@@ -164,14 +170,16 @@ defmodule Examples.EUser do
 
   defrel dropped(n, [_ | t], ys) do
     n > 1
-    dropped(n - 1, t, ys)
+    n1 = n - 1
+    dropped(n1, t, ys)
   end
 
   defrel from_zero(0, 1)
 
   defrel from_zero(x, v) do
     x > 0
-    from_zero(x - 1, w)
+    x1 = x - 1
+    from_zero(x1, w)
     v = w + 1
   end
 
@@ -246,7 +254,8 @@ defmodule Examples.EUser do
 
         wide(x, v) do
           x > 1
-          wide(x - 1, w)
+          x1 = x - 1
+          wide(x1, w)
           v = w + 1
           v < 10_000_000_000
         end

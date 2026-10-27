@@ -93,7 +93,7 @@ defmodule Zkfol.Lang do
 
     head = Enum.map(head, &term(&1, {name, %{}}))
     scope = {name, Map.new(Term.names(head), &{&1, true})}
-    clause = {head, Enum.with_index(lines(body), &goal(&1, &2, scope))}
+    clause = {head, Enum.map(lines(body), &goal(&1, scope))}
     Macro.escape(clause, unquote: true)
   end
 
@@ -102,7 +102,7 @@ defmodule Zkfol.Lang do
 
   defp term({:^, _, [expr]}, _scope), do: {:unquote, [], [expr]}
   defp term({:len, _, ctx}, _scope) when is_atom(ctx), do: :len
-  defp term({:reify, _, [inner]}, scope), do: {:reify, goal(inner, 0, scope)}
+  defp term({:reify, _, [inner]}, scope), do: {:reify, goal(inner, scope)}
   defp term(q, _scope) when is_integer(q), do: q
   defp term(s, scope) when is_binary(s), do: term(String.to_charlist(s), scope)
   defp term([], _scope), do: nil
@@ -111,7 +111,7 @@ defmodule Zkfol.Lang do
   defp term({name, _, ctx}, _scope) when is_atom(name) and is_atom(ctx), do: {:var, name}
 
   defp term({op, _, [a, b]}, scope) when op in [:+, :*],
-    do: polynomial(if(op == :+, do: :add, else: :mul), term(a, scope), term(b, scope))
+    do: {if(op == :+, do: :add, else: :mul), term(a, scope), term(b, scope)}
 
   defp term({:**, _, [a, q]}, scope) when is_integer(q) and q > 0,
     do: Enum.reduce(2..q//1, term(a, scope), fn _, acc -> {:mul, acc, term(a, scope)} end)
@@ -128,33 +128,26 @@ defmodule Zkfol.Lang do
   defp term({_callee, _, args} = call, scope) when is_list(args),
     do: {:papply, reference(call, scope), Enum.map(args, &term(&1, scope))}
 
-  defp polynomial(tag, q, t) when is_integer(q) and not is_integer(t), do: {tag, t, q}
-  defp polynomial(tag, t, u), do: {tag, t, u}
+  defp goal({:=, _, [a, b]}, scope), do: {:eq, term(a, scope), term(b, scope)}
 
-  defp goal({:=, _, [r, {:mod, _, [e, m]}]}, k, scope),
-    do: {:call, primitive(:mod), [term(e, scope), term(m, scope), term(r, scope), hole(:q, k)]}
-
-  defp goal({:=, _, [a, b]}, _k, scope), do: {:eq, term(a, scope), term(b, scope)}
-
-  defp goal({op, _, [a, b]}, k, scope) when op in [:<, :>, :<=, :>=, :!=] do
+  defp goal({op, _, [a, b]}, scope) when op in [:<, :>, :<=, :>=, :!=] do
     name = %{:< => :lt, :> => :gt, :<= => :lte, :>= => :gte, :!= => :neq}[op]
-    {:call, primitive(name), [term(a, scope), term(b, scope), hole(:s, k)]}
+    {:call, primitive(name), [term(a, scope), term(b, scope)]}
   end
 
-  defp goal({{:., _, [callback]}, _, args}, _k, scope),
+  defp goal({{:., _, [callback]}, _, args}, scope),
     do: {:call, term(callback, scope), Enum.map(args, &term(&1, scope))}
 
-  defp goal({callee, _, args}, _k, {_name, params} = scope)
+  defp goal({callee, _, args}, {_name, params} = scope)
        when is_map_key(params, callee) and is_list(args),
        do: {:call, {:var, callee}, Enum.map(args, &term(&1, scope))}
 
-  defp goal({_callee, _, args} = call, _k, scope) when is_list(args),
+  defp goal({_callee, _, args} = call, scope) when is_list(args),
     do: {:call, reference(call, scope), Enum.map(args, &term(&1, scope))}
 
-  defp goal(form, _k, _scope),
+  defp goal(form, _scope),
     do: raise(ArgumentError, "a goal is an equation or a call, not #{Macro.to_string(form)}")
 
-  defp hole(tag, k), do: {:var, :"_#{tag}#{k}"}
   defp primitive(name), do: reference({{:., [], [Zkfol.Prims, name]}, [], []}, {nil, %{}})
   defp reference({self, _, _args}, {self, _params}), do: self
 
