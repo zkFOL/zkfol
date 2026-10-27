@@ -25,7 +25,8 @@ defmodule Zkfol.MixProject do
       {:event_broker, "~> 1.1.1"},
       {:rustler, "~> 0.38.0", runtime: false},
       {:gt_bridge, "~> 0.20.1", override: true},
-      {:al, git: "https://merge-base.com/aleph/AL.git", branch: "mariari/al-integration"},
+      {:al,
+       git: "https://merge-base.com/aleph/AL.git", ref: "2944dc65132504312530fea74c0750acc4abb267"},
       {:typed_struct, "~> 0.3"},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]

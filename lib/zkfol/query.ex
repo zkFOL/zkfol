@@ -127,7 +127,7 @@ defmodule Zkfol.Query do
     case result do
       {:ok, state} ->
         [%AL.Goal.Compound{args: [_object | args]}] = state.program
-        answer = args |> Enum.drop(-1) |> AL.Var.subst(state.active_choicepoint.store)
+        answer = AL.Var.subst(args, state.active_choicepoint.store)
         query = {program, source, state, taken}
 
         if ground?(answer),

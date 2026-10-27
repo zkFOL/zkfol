@@ -11,6 +11,7 @@ defmodule Zkfol.Al do
   - `result/1`: interpret an AL transaction result.
   - `derived/3`: run with AL tracing and return the derivation used by the prover.
   - `method/1`: map a relation name to its AL method name.
+  - `var/1`: map a source variable name to its AL spelling.
   """
 
   alias Zkfol.{Ast, Derivation, Log, Program, Refusal, Statement}
@@ -54,7 +55,7 @@ defmodule Zkfol.Al do
     args = Enum.map(arguments, &query_argument/1)
 
     run(
-      [call(method(root.name), [program.id | args ++ [fresh()]])],
+      [call(method(root.name), [program.id | args])],
       branch(program.branch),
       opts
     )
@@ -112,28 +113,29 @@ defmodule Zkfol.Al do
   @spec method(Term.name()) :: atom()
   def method(name), do: :"rel:#{Rel.name(name)}"
 
+  @doc "I map a source variable name to its AL spelling."
+  @spec var(atom()) :: AL.Var.variable()
+  def var(name), do: name |> Atom.to_string() |> :string.titlecase() |> AL.Var.var()
+
   defp clause(%Rel{al: {:definition, native}} = rel, {head, body}, trace?),
     do: clause(%{rel | al: native}, {head, if(trace?, do: body, else: [])}, trace?)
 
-  defp clause(rel, {head, body}, trace?) do
+  defp clause(rel, {head, body}, _trace?) do
     for term <- head,
         not Term.seatable?(term),
         do: throw({:refused, {:head_not_a_column, %{head: term}}})
 
-    # Source locals must survive the call so the derivation can bind proof columns.
-    locals = if trace?, do: Map.new(Term.names(head ++ body), &{&1, var(&1)}), else: %{}
-
     call(:defmethod, [
       @object,
       method(rel.name),
-      [@self | Enum.map(head, &term/1) ++ [locals]],
+      [@self | Enum.map(head, &term/1)],
       native(rel.al) ++ Enum.flat_map(body, &goal/1)
     ])
   end
 
   defp goal({:eq, left, right}), do: [call(:=, [term(left), term(right)])]
 
-  defp goal({:call, name, args}), do: dispatch(name, Enum.map(args, &term/1) ++ [fresh()])
+  defp goal({:call, name, args}), do: dispatch(name, Enum.map(args, &term/1))
 
   defp dispatch({:var, carrier}, args) do
     [name, prefix, supplied] = for _ <- 1..3, do: fresh()
@@ -176,11 +178,10 @@ defmodule Zkfol.Al do
     {pid, ref} =
       spawn_monitor(fn ->
         Process.flag(:max_heap_size, %{size: heap, kill: true, error_logger: false})
-        names = Map.new(source.rels, &{method(&1.name), {&1.name, &1.arity}})
 
         result =
           with {:ok, state} <- invoke(program, source, trace: [:domino]),
-               do: {:ok, Derivation.of(state, names)}
+               do: {:ok, Derivation.of(state, source.rels)}
 
         exit({:derived, result})
       end)
@@ -210,7 +211,6 @@ defmodule Zkfol.Al do
 
   defp branch(id) when id in [nil, :head], do: AL.Branch.head()
   defp branch(id), do: %AL.Branch{id: id}
-  defp var(name), do: name |> Atom.to_string() |> :string.titlecase() |> AL.Var.var()
   defp fresh, do: AL.Var.fresh(AL.Var.var("_Tmp"), to_string(AL.fresh_scope()))
   defp call(name, args), do: %AL.Goal.Compound{name: name, args: args}
 end

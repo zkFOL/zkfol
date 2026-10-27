@@ -8,6 +8,9 @@ defmodule Zkfol.Derivation do
 
   use TypedStruct
 
+  alias Zkfol.Al
+  alias Zkfol.Lang.{Rel, Term}
+
   @typedoc "One established fact: the relation and its ground tuple."
   @type fact :: {atom(), [term()]}
 
@@ -23,11 +26,13 @@ defmodule Zkfol.Derivation do
   I am the derivation AL's journal carries, deduplicated, callees ahead of their callers;
   each fact sits beside what its calls consumed and the seq that established it.
   """
-  @typedoc "The relations by the method each is installed as: its name and arity."
-  @type methods :: %{atom() => {atom(), non_neg_integer()}}
+  @typedoc "The source relations by their installed AL method names."
+  @type methods :: %{atom() => Rel.t()}
 
-  @spec of(AL.JAM.State.t(), methods()) :: t()
-  def of(state = %AL.JAM.State{active_choicepoint: %{store: store}}, names) do
+  @spec of(AL.JAM.State.t(), [Rel.t()]) :: t()
+  def of(state = %AL.JAM.State{active_choicepoint: %{store: store}}, rels) do
+    names = Map.new(rels, &{Al.method(&1.name), &1})
+
     nodes =
       state
       |> AL.Trace.derivation_tree()
@@ -88,8 +93,13 @@ defmodule Zkfol.Derivation do
             fact?(kid, names),
             do: fact_of(kid, kid_answer.derived, names, store)
 
-      {_self, _method, args} = label
-      bindings = args |> List.last() |> resolved(answer.derived) |> AL.Var.subst(store)
+      {_self, method, _args} = label
+      {head, body} = names[method].clauses |> Enum.at(answer.clause)
+
+      bindings =
+        Map.new(Term.names(head ++ body), fn name ->
+          {name, answer.bindings |> Map.fetch!(Al.var(name)) |> AL.Var.subst(store)}
+        end)
 
       below ++
         [{fact_of(label, answer.derived, names, store), {consumed, answer.clause, bindings}}]
@@ -102,7 +112,7 @@ defmodule Zkfol.Derivation do
   @spec fact?(term(), methods()) :: boolean()
   defp fact?({_self, m, args}, names) do
     case Map.get(names, m) do
-      {_name, arity} -> arity == length(args) - 1
+      %Rel{arity: arity} -> arity == length(args)
       nil -> false
     end
   end
@@ -111,10 +121,10 @@ defmodule Zkfol.Derivation do
 
   @spec fact_of(term(), map() | nil, methods(), map()) :: fact()
   defp fact_of({_self, m, args}, derived, names, store) do
-    {name, arity} = Map.fetch!(names, m)
+    %Rel{name: name} = Map.fetch!(names, m)
 
     values =
-      for arg <- Enum.take(args, arity), do: arg |> resolved(derived) |> AL.Var.subst(store)
+      for arg <- args, do: arg |> resolved(derived) |> AL.Var.subst(store)
 
     {name, values}
   end

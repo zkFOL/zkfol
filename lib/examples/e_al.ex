@@ -52,7 +52,10 @@ defmodule Examples.EAl do
       |> Enum.find(fn [name, _source] -> name == "rel:pick" end)
 
     {:ok, %AL.Syntax.Result{program: [_clear, definition]}} = AL.Syntax.parse(source <> ".")
-    %AL.Goal.Compound{args: [_object, _name, _head, body]} = definition
+    %AL.Goal.Compound{args: [_object, _name, head, body]} = definition
+    assert length(head) == pick().arity + 1
+    [call | _] = body
+    assert length(call.args) == tab().arity + 1
     assert Enum.map(body, & &1.name) == [Al.method(:tab), :=]
     assert {:ok, [1, 41]} = Query.next(query)
     assert :ok = Query.close(query)
