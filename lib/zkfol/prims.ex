@@ -2,6 +2,7 @@ defmodule Zkfol.Prims do
   @moduledoc """
   I am the library the surface's comparisons, reductions and reads call:
   each is a relation whose body is its meaning, written once.
+  `mod(e, m, r)` keeps its quotient local; comparisons keep their slack local.
   """
 
   use Zkfol.Lang
@@ -12,25 +13,25 @@ defmodule Zkfol.Prims do
   defrel natural(x)
 
   @al "> A B"
-  defrel gt(a, b, s) do
+  defrel gt(a, b) do
     a = b + 1 + s
     natural(s)
   end
 
   @al ">= A B"
-  defrel gte(a, b, s) do
+  defrel gte(a, b) do
     a = b + s
     natural(s)
   end
 
   @al "< A B"
-  defrel lt(a, b, s) do
+  defrel lt(a, b) do
     b = a + 1 + s
     natural(s)
   end
 
   @al "<= A B"
-  defrel lte(a, b, s) do
+  defrel lte(a, b) do
     b = a + s
     natural(s)
   end
@@ -39,16 +40,17 @@ defmodule Zkfol.Prims do
   defrel nth(1, [v | _], v)
 
   defrel nth(n, [_ | t], v) do
-    nth(n - 1, t, v)
+    n1 = n - 1
+    nth(n1, t, v)
   end
 
   # One branch stands above, the other below: apart either way.
-  defrel neq(a, b, s) do
+  defrel neq(a, b) do
     a = b + 1 + s
     natural(s)
   end
 
-  defrel neq(a, b, s) do
+  defrel neq(a, b) do
     b = a + 1 + s
     natural(s)
   end
@@ -72,7 +74,7 @@ defmodule Zkfol.Prims do
   defrel absent(_x, [])
 
   defrel absent(x, [y | ys]) do
-    neq(x, y, _s)
+    neq(x, y)
     absent(x, ys)
   end
 
@@ -88,7 +90,7 @@ defmodule Zkfol.Prims do
   @al "label X"
   defrel label(x)
 
-  defrel mod(e, m, r, q) do
+  defrel mod(e, m, r) do
     e = m * q + r
     r < m
     natural(r)

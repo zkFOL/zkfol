@@ -59,11 +59,11 @@ ZkfolQuery >> gtAnswersFor: aView [
 
 { #category : 'views' }
 ZkfolQuery >> gtProgramFor: aView [
-	"The AL program my ask steps through, on the branch it landed on; AL draws it."
+	"The AL program my query executes on its branch; AL draws it."
 	<gtView>
 	<gtBeamView>
 	| program |
-	program := self evaluateOrNil: 'Zkfol.Al.program(' , self resolve , '.ask)'.
+	program := self evaluateOrNil: self resolve , '.program'.
 	(program isKindOf: ALObject) ifFalse: [ ^ aView empty ].
 	^ aView forward
 		title: 'Program';

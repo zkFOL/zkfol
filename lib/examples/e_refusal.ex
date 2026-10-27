@@ -29,7 +29,6 @@ defmodule Examples.ERefusal do
       {:constant_exceeds_cell, %{constant: Integer.pow(2, 63)}},
       {:head_not_a_column, %{head: {:add, 1, 1}}},
       {:heap_exhausted, %{said: "the derivation exceeded 256000000 heap words"}},
-      {:len_needs_a_bound_count, %{}},
       {:no_answer, %{relation: :fib}},
       {:no_answer, %{}},
       {:no_relations, %{}},

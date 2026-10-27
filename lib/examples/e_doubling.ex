@@ -4,6 +4,7 @@ defmodule Examples.EDoubling do
   use ExExample
 
   import ExUnit.Assertions
+  import Zkfol.Prims, only: [mod: 0]
   require Zkfol.Lang
 
   alias Examples.EUser
@@ -41,9 +42,11 @@ defmodule Examples.EDoubling do
 
       fibm(x, v) do
         x > 2
-        fibm(x - 1, v1)
-        fibm(x - 2, v2)
-        v = mod(v1 + v2, ^m)
+        x1 = x - 1
+        fibm(x1, v1)
+        x2 = x - 2
+        fibm(x2, v2)
+        mod(v1 + v2, ^m, v)
       end
     end
   end
@@ -106,8 +109,10 @@ defmodule Examples.EDoubling do
 
         guarded(n, v) do
           n > 10
-          guarded(n - 1, a)
-          guarded(n - 2, b)
+          n1 = n - 1
+          guarded(n1, a)
+          n2 = n - 2
+          guarded(n2, b)
           v = a + b
         end
       end
@@ -120,8 +125,10 @@ defmodule Examples.EDoubling do
         constrained(n, v) do
           n > 2
           v = 999
-          constrained(n - 1, a)
-          constrained(n - 2, b)
+          n1 = n - 1
+          constrained(n1, a)
+          n2 = n - 2
+          constrained(n2, b)
           v = a + b
         end
       end
@@ -133,8 +140,10 @@ defmodule Examples.EDoubling do
 
         shared(n, v) do
           n > 2
-          shared(n - 1, a)
-          shared(n - 2, a)
+          n1 = n - 1
+          shared(n1, a)
+          n2 = n - 2
+          shared(n2, a)
           v = a + a
         end
       end
@@ -146,9 +155,11 @@ defmodule Examples.EDoubling do
 
         difference(n, r) do
           n > 2
-          difference(n - 1, a)
-          difference(n - 2, b)
-          r = mod(a - b, 2)
+          n1 = n - 1
+          difference(n1, a)
+          n2 = n - 2
+          difference(n2, b)
+          mod(a - b, 2, r)
         end
       end
 

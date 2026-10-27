@@ -80,8 +80,9 @@ defmodule Examples.EPhi do
 
   defrel wrapped_calls(n, direct, first, second) do
     EAlloc.held(n, direct)
-    EAlloc.delegated(n + 1, first)
-    EAlloc.delegated(n + 1, second)
+    n1 = n + 1
+    EAlloc.delegated(n1, first)
+    EAlloc.delegated(n1, second)
   end
 
   @spec recursive_relations() :: MapSet.t(atom())
@@ -108,13 +109,13 @@ defmodule Examples.EPhi do
   end
 
   defrel division_calls(0, m, x, first, second) do
-    first = mod(x, m)
-    second = mod(x + 1, m)
+    mod(x, m, first)
+    mod(x + 1, m, second)
   end
 
   defrel division_calls(1, m, x, first, second) do
-    first = mod(x + 2, m)
-    second = mod(x + 3, m)
+    mod(x + 2, m, first)
+    mod(x + 3, m, second)
   end
 
   @doc "The quotients stay local to the calls, and mod needs no member to fill them."
@@ -177,7 +178,8 @@ defmodule Examples.EPhi do
 
   defrel selected_record(n, [row, next | tail], first, second) do
     n > 1
-    selected_record(n - 1, [next | tail], _first, _second)
+    n1 = n - 1
+    selected_record(n1, [next | tail], _first, _second)
     first = second
     second = next
     record_pair(row)

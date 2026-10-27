@@ -100,7 +100,8 @@ defmodule Examples.EPassed do
   defrel odd_last(1, [out], out)
 
   defrel odd_last(n, [_head | tail], out) do
-    odd_last(n - 2, tail, out)
+    n2 = n - 2
+    odd_last(n2, tail, out)
   end
 
   @doc "A fractional stride has no bank length, so the list stays terms."
@@ -117,7 +118,8 @@ defmodule Examples.EPassed do
   end
 
   defrel last_call(n, [_head | tail], out) do
-    last_step(n - 1, tail, out)
+    n1 = n - 1
+    last_step(n1, tail, out)
   end
 
   defrel last_step(1, xs, out) do
@@ -147,11 +149,13 @@ defmodule Examples.EPassed do
   defrel loose_last(1, [_head, out], out)
 
   defrel loose_last(n, [_head | tail], out) do
-    loose_last(n - 1, tail, out)
+    n1 = n - 1
+    loose_last(n1, tail, out)
   end
 
   defrel loose_last(n, [_head | tail], out) do
-    loose_last(n - 2, tail, out)
+    n2 = n - 2
+    loose_last(n2, tail, out)
   end
 
   @doc "Two bases and two strides that disagree on the length leave the list as terms."
@@ -168,8 +172,10 @@ defmodule Examples.EPassed do
   defrel last_at(6, [_head, out], out)
 
   defrel last_at(n, [_head, next | tail], out) do
-    last_at(n - 1, [next | tail], out)
-    last_at(n - 2, tail, out)
+    n1 = n - 1
+    last_at(n1, [next | tail], out)
+    n2 = n - 2
+    last_at(n2, tail, out)
   end
 
   @doc "Different bases and strides that agree on length(xs) = n - 4 give one extent."

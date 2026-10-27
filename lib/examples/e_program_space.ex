@@ -212,8 +212,9 @@ defmodule Examples.EProgramSpace do
       {[base, nil], []},
       {[v(:x), bracket([:v], v(:t))],
        [
-         {:call, &Zkfol.Prims.gt/0, [v(:x), base, v(:_s0)]},
-         {:call, name, [{:add, v(:x), -1}, v(:t)]},
+         {:call, &Zkfol.Prims.gt/0, [v(:x), base]},
+         {:eq, v(:x1), {:add, v(:x), -1}},
+         {:call, name, [v(:x1), v(:t)]},
          {:eq, v(:v), {:add, v(:x), v(:x)}}
        ]}
     ])
@@ -229,9 +230,10 @@ defmodule Examples.EProgramSpace do
         {[1, bracket([10], nil)], []},
         {[v(:x), bracket([:v], v(:t))],
          [
-           {:call, &Zkfol.Prims.gt/0, [v(:x), 1, v(:_s0)]},
-           {:call, name, [{:add, v(:x), -1}, v(:t)]},
-           {:call, facts, [{:add, v(:x), -1}, v(:v)]}
+           {:call, &Zkfol.Prims.gt/0, [v(:x), 1]},
+           {:eq, v(:x1), {:add, v(:x), -1}},
+           {:call, name, [v(:x1), v(:t)]},
+           {:call, facts, [v(:x1), v(:v)]}
          ]}
       ]),
       rel(facts, for({x, y} <- [{1, 10}, {2, 20}, {3, 30}, {4, 40}], do: {[x, y], []}))
@@ -246,12 +248,13 @@ defmodule Examples.EProgramSpace do
       {[2, bracket([1, 0, 1, 0], nil)], []},
       {[v(:x), bracket([:v, :q, :a, :i, :b, :j], v(:t))],
        [
-         {:call, &Zkfol.Prims.gt/0, [v(:x), 2, v(:_s0)]},
-         {:call, name, [{:add, v(:x), -1}, bracket([:a, :i, :b, :j], v(:t))]},
+         {:call, &Zkfol.Prims.gt/0, [v(:x), 2]},
+         {:eq, v(:x1), {:add, v(:x), -1}},
+         {:call, name, [v(:x1), bracket([:a, :i, :b, :j], v(:t))]},
          {:eq, {:add, v(:a), v(:b)}, {:add, {:mul, v(:q), 7919}, v(:v)}},
-         {:call, &Zkfol.Prims.lt/0, [v(:v), 7919, v(:_s1)]},
-         {:call, &Zkfol.Prims.gt/0, [{:add, v(:v), 1}, 0, v(:_s2)]},
-         {:call, &Zkfol.Prims.gt/0, [{:add, v(:q), 1}, 0, v(:_s3)]}
+         {:call, &Zkfol.Prims.lt/0, [v(:v), 7919]},
+         {:call, &Zkfol.Prims.gt/0, [{:add, v(:v), 1}, 0]},
+         {:call, &Zkfol.Prims.gt/0, [{:add, v(:q), 1}, 0]}
        ]}
     ])
   end
@@ -278,7 +281,7 @@ defmodule Examples.EProgramSpace do
         {[v(:xs), v(:r)],
          [
            {:call, &Zkfol.Prims.nth/0, [1, v(:xs), v(:h)]},
-           {:call, &Zkfol.Prims.mod/0, [v(:h), 3, v(:k), v(:_q0)]},
+           {:call, &Zkfol.Prims.mod/0, [v(:h), 3, v(:k)]},
            {:call, down, [v(:k), v(:r)]}
          ]}
       ]),
@@ -286,7 +289,7 @@ defmodule Examples.EProgramSpace do
         {[0, 0], []},
         {[v(:x), v(:r)],
          [
-           {:call, &Zkfol.Prims.gt/0, [v(:x), 0, v(:_s0)]},
+           {:call, &Zkfol.Prims.gt/0, [v(:x), 0]},
            {:eq, v(:y), {:add, v(:x), -1}},
            {:call, down, [v(:y), v(:z)]},
            {:eq, v(:r), {:add, v(:z), 1}}
@@ -319,7 +322,7 @@ defmodule Examples.EProgramSpace do
 
   @spec compared([Term.t()]) :: [Term.goal()]
   defp compared([{:cons, {:var, x}, _rest} | _args]),
-    do: [{:call, &Zkfol.Prims.gt/0, [v(x), 0, v(:_s0)]}]
+    do: [{:call, &Zkfol.Prims.gt/0, [v(x), 0]}]
 
   defp compared(_head), do: []
 

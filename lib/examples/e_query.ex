@@ -13,13 +13,16 @@ defmodule Examples.EQuery do
 
   defrel loose(1, v)
 
-  defrel gap(1, v) do
+  defrel gap(1, size, v) do
+    len = size
     v = reify(1 = len)
   end
 
-  defrel gap(x, v) do
+  defrel gap(x, size, v) do
+    len = size
     x > 1
-    gap(x - 1, _w)
+    x1 = x - 1
+    gap(x1, size, _w)
     v = reify(x = len)
   end
 
@@ -44,9 +47,10 @@ defmodule Examples.EQuery do
   @doc "Closed, what a query posted is gone from its branch and the branch is not."
   @spec a_query_exhausts_then_closes() :: Zkfol.Query.t()
   example a_query_exhausts_then_closes do
-    {:ok, query} = Query.open(EAl.tab(), [:_, :_], [])
-    branch = query.ask.branch
-    assert answers?(query.ask)
+    source = %Zkfol.Statement{rels: [EAl.tab()], args: [:_, :_]}
+    {:ok, query} = Query.open(source, source.args, [])
+    branch = %AL.Branch{id: query.program.branch}
+    assert {:ok, _state} = Zkfol.Al.invoke(query.program, source)
 
     assert Enum.map(1..4, fn _ -> Query.next(query) end) ==
              [{:ok, [1, 10]}, {:ok, [2, 20]}, {:ok, [3, 40]}, {:ok, [4, 40]}]
@@ -57,7 +61,7 @@ defmodule Examples.EQuery do
     assert Query.close(query) == :ok
     assert Query.close(query) == :ok
     refute Process.alive?(query.pid)
-    refute answers?(query.ask)
+    assert {:no, _reason} = Zkfol.Al.invoke(query.program, source)
     assert branch in [AL.Branch.main() | AL.Branch.list()]
     query
   end
@@ -70,8 +74,8 @@ defmodule Examples.EQuery do
     {:ok, first} = Query.open(one, [:_, :_], [])
     {:ok, second} = Query.open(two, [:_, :_], [])
     {:ok, same} = Query.open(one, [:_, :_], [])
-    assert first.ask.branch == second.ask.branch
-    refute first.ask.class == second.ask.class
+    assert first.program.branch == second.program.branch
+    refute first.program.id == second.program.id
     assert Query.next(first) == {:ok, [1, 10]}
     assert Query.close(first) == :ok
     assert Query.next(second) == {:ok, [2, 20]}
@@ -80,10 +84,6 @@ defmodule Examples.EQuery do
     Query.close(same)
     [first, second, same]
   end
-
-  @spec answers?(Zkfol.Al.Ask.t()) :: boolean()
-  defp answers?(%Zkfol.Al.Ask{branch: branch, goal: goal}),
-    do: match?(%AL{result: {:atomic, _answer}}, AL.run(goal, branch))
 
   @doc "An answer is every asked row ground; a row left open is residue, not an answer."
   @spec an_open_row_is_residue() :: Refusal.t()
@@ -97,16 +97,19 @@ defmodule Examples.EQuery do
     reason
   end
 
-  @doc "len names the trace, which only a bound count sizes: a free count refuses."
-  @spec a_len_query_wants_its_count() :: Refusal.t()
-  example a_len_query_wants_its_count do
-    assert {:error, reason} = Query.open(gap(), [:_, :_], [])
-    assert reason == {:len_needs_a_bound_count, %{}}
+  @doc "A clause constrains len from an argument supplied at each call."
+  @spec an_explicit_length_constraint() :: Query.t()
+  example an_explicit_length_constraint do
+    {:ok, query} = Query.open(gap(), [:_, 5, :_], [])
 
-    {:ok, query} = Query.open(gap(), [5, :_], [])
-    assert Query.next(query) == {:ok, [5, 0]}
+    assert Enum.map(1..5, fn _ -> Query.next(query) end) ==
+             Enum.map(1..5, fn x -> {:ok, [x, 5, (x - 5) * (x - 5)]} end)
+
+    source = Query.statement(query)
+    assert {:ok, _state} = Zkfol.Al.invoke(query.program, %{source | args: [2, 7, 25]})
+    assert {:no, _reason} = Zkfol.Al.invoke(query.program, %{source | args: [2, 7, 9]})
     Query.close(query)
-    reason
+    query
   end
 
   @doc "An answer is a statement: statement(k) steps forward to it and hands it back."
