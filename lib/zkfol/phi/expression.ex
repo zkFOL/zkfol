@@ -103,7 +103,7 @@ defmodule Zkfol.Phi.Expression do
       {:add, a, b} -> Ast.add(Value.scalar(a), Value.scalar(b))
       {:mul, a, b} -> Ast.mul(Value.scalar(a), Value.scalar(b))
       {:cons, h, t} -> Place.consed(h, t, walk.shapes)
-      {:papply, p, fixed} -> {:rel, p, fixed}
+      {:papply, p, fixed} -> {:rel, Zkfol.Lang.Rel.name(p), fixed}
       fresh = {:fresh, _ref} -> Value.scalar(fresh)
       nil -> []
       value -> Value.shaped(value, walk.shapes)

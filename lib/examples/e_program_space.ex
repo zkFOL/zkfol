@@ -212,7 +212,7 @@ defmodule Examples.EProgramSpace do
       {[base, nil], []},
       {[v(:x), bracket([:v], v(:t))],
        [
-         {:call, :gt, [v(:x), base, v(:_s0)]},
+         {:call, &Zkfol.Prims.gt/0, [v(:x), base, v(:_s0)]},
          {:call, name, [{:add, v(:x), -1}, v(:t)]},
          {:eq, v(:v), {:add, v(:x), v(:x)}}
        ]}
@@ -229,7 +229,7 @@ defmodule Examples.EProgramSpace do
         {[1, bracket([10], nil)], []},
         {[v(:x), bracket([:v], v(:t))],
          [
-           {:call, :gt, [v(:x), 1, v(:_s0)]},
+           {:call, &Zkfol.Prims.gt/0, [v(:x), 1, v(:_s0)]},
            {:call, name, [{:add, v(:x), -1}, v(:t)]},
            {:call, facts, [{:add, v(:x), -1}, v(:v)]}
          ]}
@@ -246,12 +246,12 @@ defmodule Examples.EProgramSpace do
       {[2, bracket([1, 0, 1, 0], nil)], []},
       {[v(:x), bracket([:v, :q, :a, :i, :b, :j], v(:t))],
        [
-         {:call, :gt, [v(:x), 2, v(:_s0)]},
+         {:call, &Zkfol.Prims.gt/0, [v(:x), 2, v(:_s0)]},
          {:call, name, [{:add, v(:x), -1}, bracket([:a, :i, :b, :j], v(:t))]},
          {:eq, {:add, v(:a), v(:b)}, {:add, {:mul, v(:q), 7919}, v(:v)}},
-         {:call, :lt, [v(:v), 7919, v(:_s1)]},
-         {:call, :gt, [{:add, v(:v), 1}, 0, v(:_s2)]},
-         {:call, :gt, [{:add, v(:q), 1}, 0, v(:_s3)]}
+         {:call, &Zkfol.Prims.lt/0, [v(:v), 7919, v(:_s1)]},
+         {:call, &Zkfol.Prims.gt/0, [{:add, v(:v), 1}, 0, v(:_s2)]},
+         {:call, &Zkfol.Prims.gt/0, [{:add, v(:q), 1}, 0, v(:_s3)]}
        ]}
     ])
   end
@@ -259,12 +259,13 @@ defmodule Examples.EProgramSpace do
   # A cell read off the bank: at a literal index, or at one the body computes.
   @spec cell_of(atom(), :literal | :computed) :: Rel.t()
   defp cell_of(name, :literal),
-    do: rel(name, [{[v(:xs), v(:v)], [{:call, :nth, [2, v(:xs), v(:v)]}]}])
+    do: rel(name, [{[v(:xs), v(:v)], [{:call, &Zkfol.Prims.nth/0, [2, v(:xs), v(:v)]}]}])
 
   defp cell_of(name, :computed),
     do:
       rel(name, [
-        {[v(:xs), v(:v)], [{:eq, v(:k), {:add, 1, 1}}, {:call, :nth, [v(:k), v(:xs), v(:v)]}]}
+        {[v(:xs), v(:v)],
+         [{:eq, v(:k), {:add, 1, 1}}, {:call, &Zkfol.Prims.nth/0, [v(:k), v(:xs), v(:v)]}]}
       ])
 
   # A chain no column counts: a cell of the bank aims a walk that reaches itself.
@@ -276,8 +277,8 @@ defmodule Examples.EProgramSpace do
       rel(name, [
         {[v(:xs), v(:r)],
          [
-           {:call, :nth, [1, v(:xs), v(:h)]},
-           {:call, :mod, [v(:h), 3, v(:k), v(:_q0)]},
+           {:call, &Zkfol.Prims.nth/0, [1, v(:xs), v(:h)]},
+           {:call, &Zkfol.Prims.mod/0, [v(:h), 3, v(:k), v(:_q0)]},
            {:call, down, [v(:k), v(:r)]}
          ]}
       ]),
@@ -285,7 +286,7 @@ defmodule Examples.EProgramSpace do
         {[0, 0], []},
         {[v(:x), v(:r)],
          [
-           {:call, :gt, [v(:x), 0, v(:_s0)]},
+           {:call, &Zkfol.Prims.gt/0, [v(:x), 0, v(:_s0)]},
            {:eq, v(:y), {:add, v(:x), -1}},
            {:call, down, [v(:y), v(:z)]},
            {:eq, v(:r), {:add, v(:z), 1}}
@@ -301,11 +302,11 @@ defmodule Examples.EProgramSpace do
     succ = :"#{name}_succ"
 
     [
-      rel(name, [{[v(:xs), v(:ys)], [{:call, each, [v(:xs), v(succ), v(:ys)]}]}]),
+      rel(name, [{[v(:xs), v(:ys)], [{:call, each, [v(:xs), {:papply, succ, []}, v(:ys)]}]}]),
       rel(each, [
         {[nil, v(:_r), nil], []},
         {[bracket([:h], v(:t)), v(:r), bracket([:g], v(:s))],
-         [{:call, :r, [v(:h), v(:g)]}, {:call, each, [v(:t), v(:r), v(:s)]}]}
+         [{:call, {:var, :r}, [v(:h), v(:g)]}, {:call, each, [v(:t), v(:r), v(:s)]}]}
       ]),
       rel(succ, [{[v(:x), v(:y)], [{:eq, v(:y), {:add, v(:x), 1}}]}])
     ]
@@ -317,7 +318,9 @@ defmodule Examples.EProgramSpace do
     do: %{rel | clauses: for({head, body} <- clauses, do: {head, body ++ compared(head)})}
 
   @spec compared([Term.t()]) :: [Term.goal()]
-  defp compared([{:cons, {:var, x}, _rest} | _args]), do: [{:call, :gt, [v(x), 0, v(:_s0)]}]
+  defp compared([{:cons, {:var, x}, _rest} | _args]),
+    do: [{:call, &Zkfol.Prims.gt/0, [v(x), 0, v(:_s0)]}]
+
   defp compared(_head), do: []
 
   @spec rel(atom(), [{[Term.t()], [Term.goal()]}]) :: Rel.t()

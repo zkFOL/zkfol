@@ -6,11 +6,12 @@ defmodule Zkfol.Lang.Term do
   t    ::= q | t + t | t * t | len | var | nil | [t | t] | "s" | name(t, ...)
   goal ::= name(t, ...) | var(t, ...) | t = t | reify(goal)
 
-  Scoped, a var is the clause's own and `name(t, ...)` a relation in scope with what it
-  fixes. Names work like any normal Elixir name. A string is the bracket of its codepoints.
+  Calls carry Elixir constructor references; self calls carry the relation's name.
+  A variable is always a variable; `name(t, ...)` as a term fixes relation arguments.
+  A string is the bracket of its codepoints.
   """
 
-  @type name :: atom() | {module(), atom()}
+  @type name :: atom() | (-> Zkfol.Lang.Rel.t())
 
   @typedoc "What a term stands on: a name, the empty sequence, a bracket, a partial call, len."
   @type leaf ::

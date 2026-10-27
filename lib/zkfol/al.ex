@@ -8,7 +8,7 @@ defmodule Zkfol.Al do
   alias AL.Syntax.Printer
   alias Zkfol.Al.Ask
   alias Zkfol.Derivation
-  alias Zkfol.Lang
+  alias Zkfol.Program
   alias Zkfol.Lang.Rel
   alias Zkfol.Lang.Term
   alias Zkfol.Ast
@@ -133,9 +133,9 @@ defmodule Zkfol.Al do
   defp ground?(_open), do: false
 
   @spec rels(Statement.t() | Rel.t() | [Rel.t()]) :: {:ok, [Rel.t()]} | {:error, Refusal.t()}
-  defp rels(%Statement{rels: [root | _rest] = rels}), do: Lang.reached(root, rels)
-  defp rels(root = %Rel{}), do: Lang.reached(root, [root])
-  defp rels([root = %Rel{} | _rest] = list), do: Lang.reached(root, list)
+  defp rels(%Statement{rels: [root | _rest] = rels}), do: Program.reached(root, rels)
+  defp rels(root = %Rel{}), do: Program.reached(root, [root])
+  defp rels([root = %Rel{} | _rest] = list), do: Program.reached(root, list)
   defp rels(_none), do: {:error, {:no_relations, %{}}}
 
   # A question can use a native definition; a derivation needs the source calls as well.
@@ -293,19 +293,20 @@ defmodule Zkfol.Al do
   end
 
   @spec saying?(term(), MapSet.t()) :: boolean()
-  defp saying?({:call, q, _args}, said), do: MapSet.member?(said, q)
+  defp saying?({:call, q, _args}, said), do: MapSet.member?(said, Rel.name(q))
   defp saying?(_goal, _said), do: false
 
   # The fixpoint narrows from a bound, not from the slack standing for it, so the reading posts.
   @spec hinted(term(), %{atom() => {[term()], String.t()}}) ::
           {:ok, [term()]} | {:error, Refusal.t()}
-  defp hinted({:call, q, args}, hints) when is_map_key(hints, q) do
-    {params, al} = hints[q]
-
-    with {:ok, lowered} <- Refusal.map(args, &arith/1),
-         do:
-           {:ok,
-            saying(al, Map.new(Enum.zip(params, lowered), fn {{:var, p}, t} -> {var(p), t} end))}
+  defp hinted({:call, q, args}, hints) do
+    with {params, al} <- hints[Rel.name(q)],
+         {:ok, lowered} <- Refusal.map(args, &arith/1) do
+      {:ok, saying(al, Map.new(Enum.zip(params, lowered), fn {{:var, p}, t} -> {var(p), t} end))}
+    else
+      nil -> {:ok, []}
+      error -> error
+    end
   end
 
   defp hinted(_goal, _hints), do: {:ok, []}
@@ -356,7 +357,7 @@ defmodule Zkfol.Al do
   end
 
   # A call through a passed name is Prolog's call/N: the compound's arguments lead, send it.
-  @spec sent(atom() | {:var, atom()}, [term()], non_neg_integer(), non_neg_integer()) ::
+  @spec sent(Term.name() | {:var, atom()}, [term()], non_neg_integer(), non_neg_integer()) ::
           [term()]
   defp sent({:var, carrier}, args, i, j) do
     [nm, ps, as] = for tail <- ~w(Nm Ps As), do: v("_Q#{i}c#{j}#{tail}")
@@ -425,8 +426,8 @@ defmodule Zkfol.Al do
   end
 
   @doc "I am the method name a relation is installed under. The prefix keeps relation names from shadowing AL's own methods, such as `concat`."
-  @spec method(atom()) :: atom()
-  def method(name), do: :"rel:#{name}"
+  @spec method(Term.name()) :: atom()
+  def method(name), do: :"rel:#{Rel.name(name)}"
 
   @spec clause(atom(), [term()], [term()]) :: String.t()
   defp clause(name, head, body),

@@ -2,7 +2,7 @@ defmodule Examples.EFol do
   @moduledoc "I am the standard relations' evidence: a program leans on them by name."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -56,8 +56,11 @@ defmodule Examples.EFol do
   @doc "A call or a passed relation written with its module is that module's."
   @spec qualified_map() :: Statement.t()
   example qualified_map do
-    [{_head, [{:call, {Zkfol.FOL, :map}, [_, {:papply, {EUser, :succ}, []} | _]}]}] =
+    [{_head, [{:call, map, [_, {:papply, succ, []} | _]}]}] =
       bumped().clauses
+
+    assert map.() == Zkfol.FOL.map()
+    assert succ.() == EUser.succ()
 
     assert Enum.take(Zkfol.stream(bumped(), [:_]), 1) == [[[2, 3, 4]]]
 
@@ -94,7 +97,7 @@ defmodule Examples.EFol do
   @doc "I infer a permutation's size from its list; a missing value cannot form a permutation."
   @spec permutation_size() :: Derivation.t()
   example permutation_size do
-    relation = Zkfol.Prims.permutation()
+    relation = permutation()
     {:ok, derivation} = Al.derived(relation, [:_, [3, 1, 2]])
     assert Derivation.root(derivation, :permutation) == {:permutation, [3, [3, 1, 2]]}
 

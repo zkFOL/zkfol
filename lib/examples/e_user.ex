@@ -2,7 +2,7 @@ defmodule Examples.EUser do
   @moduledoc "I am the book of user relations: every statement of the corpus, solved."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -73,7 +73,7 @@ defmodule Examples.EUser do
   @doc "The base rides as a value: the prover's knowledge enters at construction."
   @spec power_rel(integer()) :: Rel.t()
   def power_rel(base) do
-    rel :power do
+    rel do
       power(1, ^base, 0, 1)
 
       power(x, b, e, v) do
@@ -191,15 +191,15 @@ defmodule Examples.EUser do
   end
 
   defrel bumped(ys) do
-    Zkfol.FOL.map([1, 2, 3], succ, ys)
+    map([1, 2, 3], succ(), ys)
   end
 
   defrel small_rows(rs) do
-    Zkfol.FOL.each(rs, Zkfol.FOL.between(1, 4))
+    each(rs, between(1, 4))
   end
 
   defrel cells_ok(rs) do
-    Zkfol.FOL.each(rs, small_rows())
+    each(rs, small_rows())
   end
 
   defrel line("hello, world")
@@ -241,7 +241,7 @@ defmodule Examples.EUser do
   @spec a_slack_cannot_outgrow_its_word() :: Refusal.t()
   example a_slack_cannot_outgrow_its_word do
     wide =
-      rel :wide do
+      rel do
         wide(1, 1)
 
         wide(x, v) do
@@ -461,7 +461,7 @@ defmodule Examples.EUser do
   @spec spiral() :: Ast.pred()
   example spiral do
     spiral =
-      rel :spiral do
+      rel do
         spiral([], 0)
 
         spiral(xs, n) do
