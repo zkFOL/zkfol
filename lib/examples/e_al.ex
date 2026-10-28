@@ -2,7 +2,7 @@ defmodule Examples.EAl do
   @moduledoc "I am the statement running as clauses: the derivation is the witness."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -111,7 +111,7 @@ defmodule Examples.EAl do
   @doc "I give two names to the same value, without restricting it to a number."
   @spec variable_alias() :: Zkfol.Lang.Rel.t()
   example variable_alias do
-    rel :variable_alias do
+    rel do
       variable_alias(x, y) do
         y = x
       end
@@ -161,7 +161,7 @@ defmodule Examples.EAl do
   @doc "A value aims the pointer: the call reads the column another row names."
   @spec hop_rel() :: Zkfol.Lang.Rel.t()
   example hop_rel do
-    rel :hop do
+    rel do
       hop(1, 1)
 
       hop(x, v) do
@@ -296,8 +296,8 @@ defmodule Examples.EAl do
     {:ok, derivation} = Al.derived(collatz_next(), [7], [])
     {:error, reason} = Zkfol.Phi.relaid(Zkfol.Statement.of(collatz_next()), derivation)
 
-    assert {:unbound_variable, %{goals: [{:eq, {:var, :x}, {:add, {:mul, {:var, :k}, 2}, 1}}]}} =
-             reason
+    assert {:unbound_variable, %{goals: goals}} = reason
+    assert {:eq, {:var, :x}, {:add, {:mul, {:var, :k}, 2}, 1}} in goals
 
     assert Refusal.message(reason) =~ "no clause binds"
     reason

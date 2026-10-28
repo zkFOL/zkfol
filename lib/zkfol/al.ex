@@ -5,9 +5,10 @@ defmodule Zkfol.Al do
   source bindings in one final internal argument; questions leave that argument empty.
   """
 
+  alias AL.Syntax.Printer
   alias Zkfol.Al.Ask
   alias Zkfol.Derivation
-  alias Zkfol.Lang
+  alias Zkfol.Program
   alias Zkfol.Lang.Rel
   alias Zkfol.Lang.Term
   alias Zkfol.Ast
@@ -17,12 +18,14 @@ defmodule Zkfol.Al do
 
   @heap 256_000_000
 
-  @typedoc "An emitted AL program: goal structs ready for AL.eval/3."
-  @type program :: [struct()]
+  # The names I make begin `_` and a capital; a surface name never capitalises to one.
+  @self AL.Var.var("_Self")
+  @len AL.Var.var("_Len")
+  @ask AL.Var.var("_Ask")
+  @bindings AL.Var.var("_Bindings")
 
-  @typep bind :: %{optional(pos_integer()) => integer()}
-
-  @typep prep :: %{root: Rel.t(), program: program(), bind: bind(), len?: boolean()}
+  @typedoc "An emitted AL program: AL source text, ready for AL.run/3."
+  @type program :: String.t()
 
   @doc "I am the installed program owned by this ask."
   @spec program(Ask.t()) :: AL.Object.t()
@@ -67,38 +70,39 @@ defmodule Zkfol.Al do
           :question | :derivation
         ) :: {:ok, Ask.t()} | {:error, Refusal.t()}
   defp open(target, arguments, opts, mode) do
-    with {:ok, rels} <- rels(target),
-         arguments = padded(arguments, hd(rels).arity),
+    with {:ok, [root | _rest] = rels} <- rels(target),
+         {:ok, arguments} <- padded(arguments, root.arity),
+         len? = Enum.any?(rels, &mentions_len?(&1.clauses)),
+         :ok <- len_bound(len?, arguments),
          branch = %AL.Branch{id: landing(Keyword.get(opts, :branch))},
-         {:atomic, class} = :mnesia.transaction(fn -> AL.Command.fresh_id(branch) end),
-         {:ok, prep} <- prepared(rels, arguments, class, mode),
-         heap = Keyword.get(opts, :heap) || @heap,
-         :ok <- install(prep.program, branch, heap) do
+         {:ok, program} <-
+           question_program(Enum.map(rels, &implementation(&1, mode)), len?, mode),
+         {:ok, class} <- install(program, branch) do
       {:ok,
        %Ask{
          rels: rels,
-         goal: asking(prep, arguments, class),
+         goal: asking(root, arguments, len?, class),
          class: class,
          arguments: arguments,
          branch: branch,
-         heap: heap,
-         len?: prep.len?
+         heap: Keyword.get(opts, :heap) || @heap,
+         len?: len?
        }}
     end
   end
 
   @doc "I take the ask's next answer, and the ask to step again."
   @spec step(Ask.t()) :: {Ask.outcome(), Ask.t()}
-  def step(ask = %Ask{state: nil}), do: answered(AL.eval(ask.goal, nil, ask.branch, []), ask)
+  def step(ask = %Ask{state: nil}), do: answered(AL.run(ask.goal, ask.branch), ask)
   def step(ask = %Ask{state: state}), do: answered(AL.next_solution(state), ask)
 
-  @doc "I retract this ask’s clauses; other installations keep theirs."
-  @spec close(Ask.t()) :: :ok | {:error, Refusal.t()}
-  def close(%Ask{rels: rels, branch: branch, heap: heap, class: class}) do
-    program =
-      AL.ast_to_pattern({:__block__, [], retractions(Enum.map(rels, &method(&1.name)), class)})
+  # A closing ask unbinds every method on its own object; nothing reaches their clauses after.
+  @retraction ~S"forall {method Ask Name Impl} {vm_retract_method Ask Name Impl}."
 
-    install(program, branch, heap)
+  @doc "I retract this ask’s methods; other installations keep theirs."
+  @spec close(Ask.t()) :: :ok | {:error, Refusal.t()}
+  def close(%Ask{branch: branch, class: class}) do
+    with {:ok, _bindings} <- run(@retraction, branch, bindings: %{"Ask" => class}), do: :ok
   end
 
   @spec answered(term(), Ask.t()) :: {Ask.outcome(), Ask.t()}
@@ -110,15 +114,12 @@ defmodule Zkfol.Al do
     end
   end
 
-  @spec ground(AL.Var.store(), [Statement.datum() | :_]) ::
+  @spec ground(%{String.t() => term()}, [Statement.datum() | :_]) ::
           {:ok, [Statement.datum()]} | {:error, Refusal.t()}
   defp ground(bindings, arguments) do
     answer =
-      for {argument, row} <- Enum.with_index(arguments, 1) do
-        if argument == :_,
-          do: bindings |> AL.Var.deref(:"$qa#{row}") |> AL.Var.subst(bindings),
-          else: argument
-      end
+      for {argument, row} <- Enum.with_index(arguments, 1),
+          do: if(argument == :_, do: bindings[AL.Var.key(query(row))], else: argument)
 
     if Enum.all?(answer, &ground?/1),
       do: {:ok, answer},
@@ -132,22 +133,10 @@ defmodule Zkfol.Al do
   defp ground?(_open), do: false
 
   @spec rels(Statement.t() | Rel.t() | [Rel.t()]) :: {:ok, [Rel.t()]} | {:error, Refusal.t()}
-  defp rels(%Statement{rels: [root | _rest] = rels}), do: Lang.reached(root, rels)
-  defp rels(root = %Rel{}), do: Lang.reached(root, [root])
-  defp rels([root = %Rel{} | _rest] = list), do: Lang.reached(root, list)
+  defp rels(%Statement{rels: [root | _rest] = rels}), do: Program.reached(root, rels)
+  defp rels(root = %Rel{}), do: Program.reached(root, [root])
+  defp rels([root = %Rel{} | _rest] = list), do: Program.reached(root, list)
   defp rels(_none), do: {:error, {:no_relations, %{}}}
-
-  @spec prepared([Rel.t()], [Statement.datum() | :_], atom(), :question | :derivation) ::
-          {:ok, prep()} | {:error, Refusal.t()}
-  defp prepared([root | _rest] = rels, args, class, mode) do
-    len? = Enum.any?(rels, &mentions_len?(&1.clauses))
-
-    with {:ok, program} <-
-           question_program(Enum.map(rels, &implementation(&1, mode)), len?, class, mode),
-         {:ok, bind} <- bind(Enum.to_list(1..root.arity//1), args),
-         :ok <- len_bound(len?, bind),
-         do: {:ok, %{root: root, program: program, bind: bind, len?: len?}}
-  end
 
   # A question can use a native definition; a derivation needs the source calls as well.
   @spec implementation(Rel.t(), :question | :derivation) :: Rel.t()
@@ -158,21 +147,24 @@ defmodule Zkfol.Al do
   defp implementation(rel, _mode), do: rel
 
   # len names the trace, which only a bound count sizes ahead of time.
-  @spec len_bound(boolean(), bind()) :: :ok | {:error, Refusal.t()}
-  defp len_bound(false, _bind), do: :ok
-  defp len_bound(true, bind) when is_map_key(bind, 1), do: :ok
-  defp len_bound(true, _bind), do: {:error, {:len_needs_a_bound_count, %{}}}
+  @spec len_bound(boolean(), [Statement.datum() | :_]) :: :ok | {:error, Refusal.t()}
+  defp len_bound(false, _args), do: :ok
+  defp len_bound(true, [count | _rest]) when not is_atom(count), do: :ok
+  defp len_bound(true, _args), do: {:error, {:len_needs_a_bound_count, %{}}}
 
   # The root call: a bound row's value, a query variable elsewhere, the size last where len asks.
-  @spec asking(prep(), [Statement.datum() | :_], atom()) :: program()
-  defp asking(%{root: root, bind: bind, len?: len?}, arguments, class) do
-    sized = if len?, do: [Map.fetch!(bind, 1)], else: []
+  @spec asking(Rel.t(), [Statement.datum() | :_], boolean(), atom()) :: program()
+  defp asking(root, arguments, len?, class) do
+    args =
+      Enum.with_index(arguments, 1)
+      |> Enum.map(fn
+        {:_, row} -> query(row)
+        {name, _row} when is_atom(name) -> var(name)
+        {value, _row} -> value
+      end)
 
-    goal =
-      {method(root.name), [],
-       [class | goal(root.arity, bind, arguments) ++ sized ++ [v(:"$bindings")]]}
-
-    [AL.ast_to_pattern(goal)]
+    sized = if len?, do: [hd(arguments)], else: []
+    Printer.program([call(method(root.name), [class | args ++ sized ++ [@bindings]])])
   end
 
   # AL keeps every call under the frame that made it, so its journal is the derivation. The
@@ -189,9 +181,9 @@ defmodule Zkfol.Al do
 
         exit(
           {:derived,
-           case AL.eval(ask.goal, nil, ask.branch, trace_mode: :derivation_trace) do
-             {:atomic, {bindings, state}} ->
-               {:atomic, {bindings, Derivation.of(state, names, ask.len?)}}
+           case AL.run(ask.goal, ask.branch, trace: [:domino]) do
+             %AL{result: {:atomic, {bindings, constraints, state}}} ->
+               {:atomic, {bindings, constraints, Derivation.of(state, names, ask.len?)}}
 
              unanswered ->
                unanswered
@@ -208,23 +200,19 @@ defmodule Zkfol.Al do
     end
   end
 
-  @spec padded([Statement.datum() | :_], non_neg_integer()) :: [Statement.datum() | :_]
-  defp padded(args, arity) when length(args) >= arity, do: args
-  defp padded(args, arity), do: args ++ List.duplicate(:_, arity - length(args))
+  # An argument past the last row addresses nothing; zipping it away would answer another ask.
+  @spec padded([Statement.datum() | :_], non_neg_integer()) ::
+          {:ok, [Statement.datum() | :_]} | {:error, Refusal.t()}
+  defp padded(args, arity) when length(args) > arity,
+    do: {:error, {:arguments_exceed_rows, %{args: length(args), rows: arity}}}
 
-  @spec goal(pos_integer(), bind(), [integer() | atom()]) :: [Macro.t() | integer()]
-  defp goal(arity, bind, args) do
-    Enum.zip(1..arity//1, Stream.concat(args, Stream.cycle([:_])))
-    |> Enum.map(fn
-      {_row, a} when is_atom(a) and a != :_ -> v(a)
-      {row, _} -> Map.get(bind, row, v(:"qa#{row}"))
-    end)
-  end
+  defp padded(args, arity), do: {:ok, args ++ List.duplicate(:_, arity - length(args))}
 
   # A search stopped by the budget never reached a no, so it refuses as itself.
   @spec outcome(term()) ::
-          {:ok, AL.Var.store(), term()} | {:no, term()} | {:error, Refusal.t()}
-  defp outcome({:atomic, {bindings, state}}), do: {:ok, bindings, state}
+          {:ok, %{String.t() => term()}, term()} | {:no, term()} | {:error, Refusal.t()}
+  defp outcome(%AL{result: result}), do: outcome(result)
+  defp outcome({:atomic, {bindings, _constraints, state}}), do: {:ok, bindings, state}
 
   defp outcome({:aborted, %{reason: {:resource_limit_exceeded, n}}}),
     do: {:error, {:unresolved_within_budget, %{reductions: n}}}
@@ -232,17 +220,9 @@ defmodule Zkfol.Al do
   defp outcome({:aborted, reason}), do: {:no, reason}
   defp outcome(exceeded), do: Refusal.from_al(exceeded)
 
-  # An argument past the last row addresses nothing; zipping it away would answer another ask.
-  @spec bind([pos_integer()], [integer() | atom()]) :: {:ok, bind()} | {:error, Refusal.t()}
-  defp bind(rows, args) when length(args) > length(rows),
-    do: {:error, {:arguments_exceed_rows, %{args: length(args), rows: length(rows)}}}
-
-  defp bind(rows, args),
-    do: {:ok, rows |> Enum.zip(args) |> Enum.reject(fn {_row, a} -> is_atom(a) end) |> Map.new()}
-
-  @spec question_program([Rel.t()], boolean(), atom(), :question | :derivation) ::
+  @spec question_program([Rel.t()], boolean(), :question | :derivation) ::
           {:ok, program()} | {:error, Refusal.t()}
-  defp question_program(rels, len?, class, mode) do
+  defp question_program(rels, len?, mode) do
     hints =
       Map.new(
         for %Rel{al: al, clauses: [{head, _body} | _rest]} = rel <- rels,
@@ -263,49 +243,47 @@ defmodule Zkfol.Al do
     |> Enum.flat_map(fn rel -> Enum.map(rel.clauses, &{rel.name, rel.al, &1}) end)
     |> Enum.with_index()
     |> Refusal.map(fn {{rname, al, clause}, i} ->
-      question_clause(rname, al, clause, i, len?, hints, said, class, mode)
+      question_clause(rname, al, clause, i, len?, hints, said, mode)
     end)
     |> case do
-      {:ok, clauses} -> {:ok, installed(clauses, class)}
+      {:ok, clauses} -> {:ok, installed(clauses)}
       refusal -> refusal
     end
   end
 
   @spec question_clause(
           atom(),
-          Macro.t() | nil,
+          String.t() | nil,
           {[term()], [term()]},
           non_neg_integer(),
           boolean(),
-          %{atom() => {[term()], Macro.t()}},
+          %{atom() => {[term()], String.t()}},
           MapSet.t(),
-          atom(),
           :question | :derivation
-        ) :: {:ok, Macro.t()} | {:error, Refusal.t()}
-  defp question_clause(rname, al, {head, body}, i, len?, hints, said, class, mode) do
+        ) :: {:ok, String.t()} | {:error, Refusal.t()}
+  defp question_clause(rname, al, {head, body}, i, len?, hints, said, mode) do
     case Enum.find(head, &(not Term.seatable?(&1))) do
       nil ->
-        lenp = if len?, do: [v(:len)], else: []
+        lenp = if len?, do: [@len], else: []
         reading = if al, do: saying(al, %{}), else: []
         # Bind the bundle in the head so it follows this clause through backtracking.
         names = if mode == :derivation, do: Enum.uniq(Term.names(head ++ body)), else: []
-        bindings = {:%{}, [], Enum.map(names, &{&1, v(&1)})}
-
-        {entry, written} = body |> numbered() |> Enum.split_with(&postable?/1)
+        bindings = Map.new(names, &{&1, var(&1)})
 
         with {:ok, params} <- Refusal.map(head, &arith/1),
              {:ok, posted} <-
                Refusal.flat_map(Enum.reject(body, &saying?(&1, said)), &hinted(&1, hints)),
              {:ok, goals} <-
-               Refusal.flat_map(entry ++ written, fn {goal, j} ->
+               Refusal.flat_map(Enum.with_index(body), fn {goal, j} ->
                  if saying?(goal, said), do: hinted(goal, hints), else: goals({goal, j}, i, lenp)
                end) do
+          {entry, written} = Enum.split_with(goals, &postable?/1)
+
           {:ok,
-           defmethod(
-             class,
+           clause(
              method(rname),
-             [v(:self) | params ++ lenp ++ [bindings]],
-             {:__block__, [], reading ++ posted ++ goals}
+             [@self | params ++ lenp ++ [bindings]],
+             reading ++ posted ++ entry ++ written
            )}
         end
 
@@ -315,127 +293,121 @@ defmodule Zkfol.Al do
   end
 
   @spec saying?(term(), MapSet.t()) :: boolean()
-  defp saying?({:call, q, _args}, said), do: MapSet.member?(said, q)
+  defp saying?({:call, q, _args}, said), do: MapSet.member?(said, Rel.name(q))
   defp saying?(_goal, _said), do: false
 
   # The fixpoint narrows from a bound, not from the slack standing for it, so the reading posts.
-  @spec hinted(term(), %{atom() => {[term()], Macro.t()}}) ::
-          {:ok, [Macro.t()]} | {:error, Refusal.t()}
-  defp hinted({:call, q, args}, hints) when is_map_key(hints, q) do
-    {params, al} = hints[q]
-
-    with {:ok, lowered} <- Refusal.map(args, &arith/1),
-         do:
-           {:ok, saying(al, Map.new(Enum.zip(params, lowered), fn {{:var, p}, t} -> {p, t} end))}
+  @spec hinted(term(), %{atom() => {[term()], String.t()}}) ::
+          {:ok, [term()]} | {:error, Refusal.t()}
+  defp hinted({:call, q, args}, hints) do
+    with {params, al} <- hints[Rel.name(q)],
+         {:ok, lowered} <- Refusal.map(args, &arith/1) do
+      {:ok, saying(al, Map.new(Enum.zip(params, lowered), fn {{:var, p}, t} -> {var(p), t} end))}
+    else
+      nil -> {:ok, []}
+      error -> error
+    end
   end
 
   defp hinted(_goal, _hints), do: {:ok, []}
 
-  # Substituted once, so a caller's name of its own cannot be taken for the callee's.
-  @spec saying(Macro.t(), %{atom() => Macro.t()}) :: [Macro.t()]
+  # A reading is AL source over its relation's parameters. Substituted once, so a caller's
+  # name of its own cannot be taken for the callee's.
+  @spec saying(String.t(), %{AL.Var.t() => term()}) :: [term()]
   defp saying(al, by) do
-    filled = Map.new(by, fn {name, term} -> {{:hole, name}, term} end)
-
-    al
-    |> Macro.prewalk(fn
-      {name, _meta, ctx} when is_atom(name) and is_atom(ctx) ->
-        if is_map_key(by, name), do: {:hole, name}, else: {name, [], nil}
-
-      node ->
-        node
-    end)
-    |> Macro.prewalk(&Map.get(filled, &1, &1))
-    |> case do
-      {:__block__, _, goals} -> goals
-      goal -> [goal]
-    end
+    {:ok, %AL.Syntax.Result{program: goals}} = AL.Syntax.parse(al <> ".")
+    AL.Term.map(goals, &Map.get(by, &1, &1))
   end
 
-  # A call's place among the calls is what tells its fresh argument names from another's.
-  @spec numbered([term()]) :: [{term(), non_neg_integer()}]
-  defp numbered(body) do
-    body
-    |> Enum.map_reduce(0, fn
-      {:call, _n, _a} = call, j -> {{call, j}, j + 1}
-      other, j -> {{other, j}, j}
-    end)
-    |> elem(0)
-  end
-
-  # AL's fixpoint carries a linear constraint open; a product of two unknowns waits in place.
-  @spec postable?({term(), non_neg_integer()}) :: boolean()
-  defp postable?({{:eq, t, u}, _j}), do: linear?(t) and linear?(u)
-  defp postable?({_statement, _j}), do: false
+  # Structure can bind before its fields. AL carries linear constraints open;
+  # nonlinear arithmetic and calls retain their written order.
+  @spec postable?(term()) :: boolean()
+  defp postable?(%AL.Goal.Compound{name: :=, args: [t, u]}), do: linear?(t) and linear?(u)
+  defp postable?(_goal), do: false
 
   @spec linear?(term()) :: boolean()
-  defp linear?({:mul, t, u}), do: (is_integer(t) or is_integer(u)) and linear?(t) and linear?(u)
-  defp linear?({:add, t, u}), do: linear?(t) and linear?(u)
-  defp linear?({:reify, {:eq, t, u}}), do: linear?(Ast.arithmetize(Ast.eq(t, u)))
+  defp linear?(%AL.Goal.Compound{name: :*, args: [t, u]}),
+    do: (is_integer(t) or is_integer(u)) and linear?(t) and linear?(u)
+
+  defp linear?(%AL.Goal.Compound{args: [t, u]}), do: linear?(t) and linear?(u)
   defp linear?(_term), do: true
 
-  @spec goals({term(), non_neg_integer()}, non_neg_integer(), [Macro.t()]) ::
-          {:ok, [Macro.t()]} | {:error, Refusal.t()}
-  defp goals({{:eq, t, u}, _j}, _i, _lenp) do
-    aliases = match?({{:var, _}, {:var, _}}, {t, u})
-    op = if aliases or Term.sequence?(t) or Term.sequence?(u), do: :unify, else: :eq
-    with {:ok, goal} <- binary(op, t, u), do: {:ok, [goal]}
+  # AL's = unifies structure and, wherever arithmetic stands, equates numbers.
+  @spec goals({term(), non_neg_integer()}, non_neg_integer(), [term()]) ::
+          {:ok, [term()]} | {:error, Refusal.t()}
+  defp goals({{:eq, t, u}, j}, i, _lenp) do
+    if arithmetic?(t) or arithmetic?(u) do
+      with {:ok, goal} <- binary(:=, t, u), do: {:ok, [goal]}
+    else
+      with {:ok, defs, [a, b]} <- arguments([t, u], i, j),
+           do: {:ok, defs ++ [call(:=, [a, b])]}
+    end
   end
 
   defp goals({{:call, callee, args}, j}, i, lenp) do
-    with {:ok, passed} <- Refusal.map(Enum.with_index(args), &argument(&1, i, j)) do
-      {defs, args} = Enum.unzip(passed)
-      witness = v(:"$bindings#{i}c#{j}")
-      {:ok, Enum.concat(defs) ++ sent(callee, args ++ lenp ++ [witness], i, j)}
+    with {:ok, defs, args} <- arguments(args, i, j) do
+      witness = v("_B#{i}c#{j}")
+      {:ok, defs ++ sent(callee, args ++ lenp ++ [witness], i, j)}
     end
   end
 
-  # A call through a passed name is Prolog's call/N: rebuild the term, call_term it.
-  @spec sent(atom() | {:var, atom()}, [Macro.t()], non_neg_integer(), non_neg_integer()) ::
-          [Macro.t()]
+  # A call through a passed name is Prolog's call/N: the compound's arguments lead, send it.
+  @spec sent(Term.name() | {:var, atom()}, [term()], non_neg_integer(), non_neg_integer()) ::
+          [term()]
   defp sent({:var, carrier}, args, i, j) do
-    [nm, ps, as, g] = for tail <- ~w(nm ps as g), do: v(:"q#{i}c#{j}#{tail}")
+    [nm, ps, as] = for tail <- ~w(Nm Ps As), do: v("_Q#{i}c#{j}#{tail}")
 
     [
-      functor(v(carrier), nm, ps),
-      {:concat, [], [ps, args, as]},
-      functor(g, nm, as),
-      {:call_term, [], [g]}
+      call(:functor, [var(carrier), nm, ps]),
+      call(:concat, [ps, args, as]),
+      call(:send, [@self, nm, as])
     ]
   end
 
-  defp sent(name, args, _i, _j), do: [{method(name), [], [v(:self) | args]}]
+  defp sent(name, args, _i, _j), do: [call(method(name), [@self | args])]
 
-  @spec argument({term(), term()}, non_neg_integer(), non_neg_integer()) ::
-          {:ok, {[Macro.t()], Macro.t()}} | {:error, Refusal.t()}
-  defp argument({{:papply, name, prefix}, k}, i, j) do
-    fresh = v(:"q#{i}c#{j}a#{k}")
-
-    with {:ok, fixed} <-
-           Refusal.map(Enum.with_index(prefix), fn {held, p} ->
-             argument({held, "#{k}p#{p}"}, i, j)
-           end) do
-      {built, bound} = Enum.unzip(fixed)
-      {:ok, {Enum.concat(built) ++ [functor(fresh, method(name), [v(:self) | bound])], fresh}}
+  # Calls and equations consume the same values. Only arithmetic needs a fresh result.
+  @spec arguments([term()], non_neg_integer(), term()) ::
+          {:ok, [term()], [term()]} | {:error, Refusal.t()}
+  defp arguments(terms, i, j) do
+    with {:ok, passed} <- Refusal.map(Enum.with_index(terms), &argument(&1, i, j)) do
+      {defs, values} = Enum.unzip(passed)
+      {:ok, Enum.concat(defs), values}
     end
+  end
+
+  @spec argument({term(), term()}, non_neg_integer(), term()) ::
+          {:ok, {[term()], term()}} | {:error, Refusal.t()}
+  defp argument({{:papply, name, prefix}, k}, i, j) do
+    with {:ok, defs, fixed} <- arguments(prefix, i, "#{j}a#{k}"),
+         do: {:ok, {defs, call(method(name), fixed)}}
+  end
+
+  defp argument({{:cons, head, tail}, k}, i, j) do
+    with {:ok, defs, [head, tail]} <- arguments([head, tail], i, "#{j}a#{k}"),
+         do: {:ok, {defs, [head | tail]}}
   end
 
   defp argument({term, k}, i, j) do
-    fresh = v(:"q#{i}c#{j}a#{k}")
+    fresh = v("_Q#{i}c#{j}a#{k}")
 
     with {:ok, lifted} <- arith(term) do
-      if is_integer(term) or match?({:var, _nm}, term) or Term.sequence?(term),
-        do: {:ok, {[], lifted}},
-        else: {:ok, {[{:eq, [], [fresh, lifted]}], fresh}}
+      if arithmetic?(term),
+        do: {:ok, {[call(:=, [fresh, lifted])], fresh}},
+        else: {:ok, {[], lifted}}
     end
   end
 
-  @spec functor(Macro.t(), Macro.t(), [Macro.t()]) :: Macro.t()
-  defp functor(term, name, args), do: {:functor, [], [term, name, args]}
+  @spec arithmetic?(term()) :: boolean()
+  defp arithmetic?(term),
+    do:
+      term == :len or match?({:reify, _}, term) or
+        match?({op, _, _} when op in [:add, :mul], term)
 
-  @spec arith(term()) :: {:ok, Macro.t()} | {:error, Refusal.t()}
+  @spec arith(term()) :: {:ok, term()} | {:error, Refusal.t()}
   defp arith(q) when is_integer(q), do: {:ok, q}
-  defp arith(:len), do: {:ok, v(:len)}
-  defp arith({:var, nm}), do: {:ok, v(nm)}
+  defp arith(:len), do: {:ok, @len}
+  defp arith({:var, nm}), do: {:ok, var(nm)}
   defp arith({:reify, {:eq, t, u}}), do: arith(Ast.arithmetize(Ast.eq(t, u)))
   defp arith({:add, t, u}), do: binary(:+, t, u)
   defp arith({:mul, t, u}), do: binary(:*, t, u)
@@ -444,16 +416,16 @@ defmodule Zkfol.Al do
   defp arith({:cons, head, tail}) do
     with {:ok, head} <- arith(head),
          {:ok, tail} <- arith(tail),
-         do: {:ok, [{:|, [], [head, tail]}]}
+         do: {:ok, [head | tail]}
   end
 
   defp arith(term), do: {:error, {:unliftable_term, %{term: term}}}
 
-  @spec binary(atom(), term(), term()) :: {:ok, Macro.t()} | {:error, Refusal.t()}
+  @spec binary(atom(), term(), term()) :: {:ok, term()} | {:error, Refusal.t()}
   defp binary(op, t, u) do
     with {:ok, a} <- arith(t),
          {:ok, b} <- arith(u),
-         do: {:ok, {op, [], [a, b]}}
+         do: {:ok, call(op, [a, b])}
   end
 
   @spec mentions_len?([{[Term.t()], [Term.goal()]}]) :: boolean()
@@ -464,58 +436,48 @@ defmodule Zkfol.Al do
   end
 
   @doc "I am the method name a relation is installed under. The prefix keeps relation names from shadowing AL's own methods, such as `concat`."
-  @spec method(atom()) :: atom()
-  def method(name), do: :"rel:#{name}"
+  @spec method(Term.name()) :: atom()
+  def method(name), do: :"rel:#{Rel.name(name)}"
 
-  @spec defmethod(atom(), atom(), [Macro.t()], Macro.t()) :: Macro.t()
-  defp defmethod(class, name, head, body), do: {:defmethod, [], [class, name, head, [do: body]]}
+  @spec clause(atom(), [term()], [term()]) :: String.t()
+  defp clause(name, head, body),
+    do: AL.Syntax.terminate_clause(Printer.defmethod(@ask, name, head, body))
 
-  @spec installed([Macro.t()], atom()) :: program()
-  defp installed(clauses, class) do
-    program =
-      quote do
-        vm_set_class(unquote(class), :object)
-        unquote_splicing(clauses)
-      end
+  # The program mints the ask's own object, then defines its methods there.
+  @spec installed([String.t()]) :: program()
+  defp installed(clauses),
+    do: Enum.join([Printer.program([call(:new, [:object, @ask])]) | clauses], "\n\n")
 
-    AL.ast_to_pattern(program)
+  # Installations share a branch, each on the object its program mints.
+  @spec install(program(), AL.Branch.t()) :: {:ok, atom()} | {:error, Refusal.t()}
+  defp install(program, branch) do
+    with {:ok, bindings} <- run(program, branch, []), do: {:ok, bindings[AL.Var.key(@ask)]}
   end
 
-  # A closing ask retracts only methods on its own object. A retracted clause stays as
-  # history and the next posted counts past it, so the method goes too: a fresh one
-  # numbers its clauses from 0, the seq the derivation reads.
-  @spec retractions([atom()], atom()) :: [Macro.t()]
-  defp retractions(names, class) do
-    Enum.flat_map(names, fn name ->
-      [
-        quote do
-          forall([vm_method(unquote(class), unquote(name), impl), vm_clause(impl, h, _b)]) do
-            vm_retract_oapply(impl, h)
-          end
-        end,
-        quote do
-          forall([vm_method(unquote(class), unquote(name), impl)]) do
-            vm_retract_method(unquote(class), unquote(name), impl)
-          end
-        end
-      ]
-    end)
-  end
-
-  @spec install(program(), AL.Branch.t(), pos_integer()) :: :ok | {:error, Refusal.t()}
-  defp install(program, branch, heap) do
-    case outcome(AL.eval(program, nil, branch, heap: heap)) do
-      {:ok, _bindings, _state} -> :ok
+  @spec run(program(), AL.Branch.t(), keyword()) ::
+          {:ok, %{String.t() => term()}} | {:error, Refusal.t()}
+  defp run(program, branch, opts) do
+    case outcome(AL.run(program, branch, opts)) do
+      {:ok, bindings, _state} -> {:ok, bindings}
       {:no, reason} -> {:error, {:send_failed, %{reason: reason}}}
       {:error, _reason} = refusal -> refusal
     end
   end
 
-  # Installations share a branch, each on its own object.
   @spec landing(term() | nil) :: term()
   defp landing(id) when id in [nil, :head], do: AL.Branch.head().id
   defp landing(id), do: id
 
-  @spec v(atom()) :: Macro.t()
-  defp v(name), do: {name, [], nil}
+  # A surface name is an AL variable once capitalised: x is X, and _s0 stays itself.
+  @spec var(atom()) :: AL.Var.t()
+  defp var(name), do: name |> Atom.to_string() |> :string.titlecase() |> v()
+
+  @spec query(pos_integer()) :: AL.Var.t()
+  defp query(row), do: v("_Qa#{row}")
+
+  @spec v(String.t()) :: AL.Var.t()
+  defp v(name), do: AL.Var.var(name)
+
+  @spec call(atom(), [term()]) :: AL.Goal.Compound.t()
+  defp call(name, args), do: %AL.Goal.Compound{name: name, args: args}
 end

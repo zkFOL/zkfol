@@ -5,30 +5,31 @@ defmodule Zkfol.Prims do
   """
 
   use Zkfol.Lang
+  import Zkfol.FOL
 
   @phi {Zkfol.Ast, :natural}
-  @al quote(do: x >= 0)
+  @al ">= X 0"
   defrel natural(x)
 
-  @al quote(do: a > b)
+  @al "> A B"
   defrel gt(a, b, s) do
     a = b + 1 + s
     natural(s)
   end
 
-  @al quote(do: a >= b)
+  @al ">= A B"
   defrel gte(a, b, s) do
     a = b + s
     natural(s)
   end
 
-  @al quote(do: a < b)
+  @al "< A B"
   defrel lt(a, b, s) do
     b = a + 1 + s
     natural(s)
   end
 
-  @al quote(do: a <= b)
+  @al "<= A B"
   defrel lte(a, b, s) do
     b = a + s
     natural(s)
@@ -56,7 +57,7 @@ defmodule Zkfol.Prims do
   # The clauses define it for a list the lowering cannot read as cells: each element is
   # absent from the rest.
   @phi {Zkfol.Ast, :distinct}
-  @al {:definition, quote(do: all_dif(cells))}
+  @al {:definition, "all_dif Cells"}
   defrel all_distinct(cells) do
     pairwise(cells)
   end
@@ -84,7 +85,7 @@ defmodule Zkfol.Prims do
   end
 
   # Evaluation only: a free cell takes each value of its domain in turn.
-  @al quote(do: label(x))
+  @al "label X"
   defrel label(x)
 
   defrel mod(e, m, r, q) do

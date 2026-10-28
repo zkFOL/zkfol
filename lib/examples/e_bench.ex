@@ -5,7 +5,7 @@ defmodule Examples.EBench do
   """
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   alias Examples.EAl
   alias Examples.EDoubling
@@ -61,7 +61,10 @@ defmodule Examples.EBench do
   @doc "Section 4: the 16x16 grid, through the same sudoku/2 as the 9x9, range checks included."
   @spec sudoku16() :: map()
   example sudoku16 do
-    measurement("sudoku 16x16", solved(ESudoku.solved16(), ESudoku.act16()))
+    measurement(
+      "sudoku 16x16",
+      solved(ESudoku.solved16(), ESudoku.act16())
+    )
   end
 
   @doc "Section 4, solving not only checking: the 9x9 answered from its seventeen clues."
@@ -115,7 +118,9 @@ defmodule Examples.EBench do
 
   @spec solved(Zkfol.Lang.Rel.t(), [Statement.datum() | :_]) :: Statement.t()
   defp solved(rel, args) do
-    {:ok, statement, _trace} = Pipeline.run(EUser.plain(), %Statement{rels: [rel], args: args})
+    {:ok, statement, _trace} =
+      Pipeline.run(EUser.plain(), %Statement{rels: [rel], args: args})
+
     statement
   end
 

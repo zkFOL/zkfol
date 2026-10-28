@@ -2,7 +2,7 @@ defmodule Examples.EFol do
   @moduledoc "I am the standard relations' evidence: a program leans on them by name."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -28,15 +28,18 @@ defmodule Examples.EFol do
   end
 
   defrel columns_apart(x) do
+    array([9, 9], x)
     column(x, cols)
     each(cols, permutation(9))
   end
 
   defrel literal_columns(cs) do
+    array([2, 2], cs)
     column([[1, 2], [3, 4]], cs)
   end
 
   defrel there_and_back(x) do
+    array([9, 9], x)
     column(x, cs)
     column(cs, back)
     each(back, permutation(9))
@@ -44,6 +47,11 @@ defmodule Examples.EFol do
 
   defrel bumped(ys) do
     Zkfol.FOL.map([1, 2, 3], Examples.EUser.succ(), ys)
+  end
+
+  defrel rising_three(xs) do
+    array([3], xs)
+    rising(xs)
   end
 
   defrel rising([_last])
@@ -56,8 +64,11 @@ defmodule Examples.EFol do
   @doc "A call or a passed relation written with its module is that module's."
   @spec qualified_map() :: Statement.t()
   example qualified_map do
-    [{_head, [{:call, {Zkfol.FOL, :map}, [_, {:papply, {EUser, :succ}, []} | _]}]}] =
+    [{_head, [{:call, map, [_, {:papply, succ, []} | _]}]}] =
       bumped().clauses
+
+    assert map.() == Zkfol.FOL.map()
+    assert succ.() == EUser.succ()
 
     assert Enum.take(Zkfol.stream(bumped(), [:_]), 1) == [[[2, 3, 4]]]
 
@@ -94,7 +105,7 @@ defmodule Examples.EFol do
   @doc "I infer a permutation's size from its list; a missing value cannot form a permutation."
   @spec permutation_size() :: Derivation.t()
   example permutation_size do
-    relation = Zkfol.Prims.permutation()
+    relation = permutation()
     {:ok, derivation} = Al.derived(relation, [:_, [3, 1, 2]])
     assert Derivation.root(derivation, :permutation) == {:permutation, [3, [3, 1, 2]]}
 
@@ -155,12 +166,12 @@ defmodule Examples.EFol do
   @spec a_read_value_is_laid() :: [atom()]
   example a_read_value_is_laid do
     {:ok, statement, _trace} =
-      Pipeline.run(EUser.plain(), %Statement{rels: [rising()], args: [[1, 2, 3]]})
+      Pipeline.run(EUser.plain(), %Statement{rels: [rising_three()], args: [[1, 2, 3]]})
 
     names = Alloc.names(Statement.alloc(statement))
 
-    assert :rising in names
-    assert :"rising a1" in names
+    assert :rising_three in names
+    assert :"rising_three xs" in names
     names
   end
 

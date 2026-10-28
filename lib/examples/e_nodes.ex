@@ -1,7 +1,7 @@
 defmodule Examples.ENodes do
   @moduledoc "I exercise constructed terms across calls, their sharing, and their proof obligations."
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
   import ExUnit.Assertions
 
   alias Examples.EAst
@@ -60,6 +60,7 @@ defmodule Examples.ENodes do
   end
 
   defrel bridge(xs, s) do
+    array([2], xs)
     tree(xs, s)
   end
 
@@ -88,11 +89,11 @@ defmodule Examples.ENodes do
     statement = solved(bridge(), [[0, 0], :_])
     alloc = Statement.alloc(statement)
     witness = Statement.witness(statement)
-    suffix = Alloc.row(alloc, {Zkfol.Nodes, {:suffix, {:"bridge xs", :scalar}}})
+    row = Alloc.row(alloc, {:"bridge xs", 1})
+    assert Enum.count(alloc.members, &is_struct(&1, Alloc.Bank)) == 1
 
-    for x <- 1..Interpretation.len(witness), Interpretation.at(witness, suffix, x) != 1 do
-      forged = EAst.tamper(witness, suffix, x, 1)
-
+    for x <- [2, 3] do
+      forged = EAst.tamper(witness, row, x, 1)
       refute Semantics.valid?(Statement.pred(statement), forged)
     end
 
@@ -100,7 +101,7 @@ defmodule Examples.ENodes do
     statement
   end
 
-  @doc "A rank-three value keeps every scalar; a two-axis bank cannot represent it."
+  @doc "An undeclared rank-three value keeps every scalar in shared term storage."
   @spec a_cube_keeps_every_cell() :: Statement.t()
   example a_cube_keeps_every_cell do
     cube = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
@@ -120,10 +121,20 @@ defmodule Examples.ENodes do
   @doc "Reverse allocates its constructed tails across calls; the source list remains a bank."
   @spec reverse([non_neg_integer()]) :: Statement.t()
   example reverse(xs \\ [1, 2, 3]) do
-    statement = solved(rev(), [xs, :_])
+    n = length(xs)
 
-    assert Derivation.root(Statement.derivation(statement), :rev) ==
-             {:rev, [xs, Enum.reverse(xs)]}
+    relation =
+      rel do
+        reversed(xs, ys) do
+          array([^n], xs)
+          rev(xs, ys)
+        end
+      end
+
+    statement = solved(relation, [xs, :_])
+
+    assert Derivation.root(Statement.derivation(statement), :reversed) ==
+             {:reversed, [xs, Enum.reverse(xs)]}
 
     statement
   end
@@ -132,7 +143,13 @@ defmodule Examples.ENodes do
   @spec constructed_terms_prove() :: [Statement.t()]
   example constructed_terms_prove do
     reversed = reverse()
-    assert Statement.bank(reversed, :"rev a1") |> List.first() |> Enum.take(4) == [0, 3, 2, 1]
+
+    assert Statement.bank(reversed, :"reversed xs") |> List.first() |> Enum.take(4) == [
+             0,
+             3,
+             2,
+             1
+           ]
 
     for statement <- [reversed, solved(tree(), [[[0, 0], 0], :_])] do
       assert {:ok, %Prover.Report{}, _id} =
@@ -202,10 +219,10 @@ defmodule Examples.ENodes do
     uair
   end
 
-  @spec solved(Zkfol.Lang.Rel.t(), [term()]) :: Statement.t()
-  defp solved(rel, args) do
+  @spec solved(Zkfol.Lang.Rel.t(), [term()], keyword()) :: Statement.t()
+  defp solved(rel, args, opts \\ []) do
     {:ok, statement, _trace} =
-      Pipeline.run(Examples.EUser.plain(), %Statement{rels: [rel], args: args})
+      Pipeline.run(Examples.EUser.plain(), %Statement{rels: [rel], args: args}, opts)
 
     assert Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
     assert Examples.EFace.bridged(statement) == statement
