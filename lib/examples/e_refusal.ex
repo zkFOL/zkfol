@@ -23,6 +23,7 @@ defmodule Examples.ERefusal do
   def detailed do
     [
       {:arguments_exceed_rows, %{args: 3, rows: 2}},
+      {:backend_unavailable, %{backend: Zkfol.Lileum}},
       {:beyond_the_rows, %{relation: :fib}},
       {:beyond_the_rows, %{sequence: :xs}},
       {:claim_outside_witness, %{claim: "fib.v", row: 9, column: 1}},

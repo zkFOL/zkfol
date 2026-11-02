@@ -38,16 +38,18 @@ defmodule Zkfol.Prover do
   @spec start_link(term()) :: GenServer.on_start()
   def start_link(_opts), do: GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
 
-  @doc "I emit and prove `pred` on `witness`; `opts` takes `:name`, `:basedon`, `:claims`."
+  @doc "I send `pred` and `witness` to `:backend` (Zinc+ by default), with `opts`."
   @spec prove(Ast.pred(), Interpretation.t(), keyword()) ::
           {:ok, Report.t(), pos_integer()} | {:error, Refusal.t()}
   def prove(pred, witness, opts \\ []) do
-    with {:ok, uair} <- Uair.emit(pred, witness, Keyword.get(opts, :claims, [])) do
-      prove_uair(uair, opts)
-    end
+    backend = Keyword.get(opts, :backend, ZincPlus)
+    backend.prove(pred, witness, opts)
   end
 
-  @doc "I prove `uair` through the log; `opts` takes `:name`, `:basedon`, `:timeout`, and the transport's own."
+  @doc """
+  I prove an emitted Zinc+ `uair` through the log; `opts` takes `:name`, `:basedon`,
+  `:timeout`, and transport options.
+  """
   @spec prove_uair(Uair.t(), keyword()) ::
           {:ok, Report.t(), pos_integer()} | {:error, Refusal.t()}
   def prove_uair(uair, opts \\ []) do

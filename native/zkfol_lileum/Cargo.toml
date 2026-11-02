@@ -1,0 +1,12 @@
+[package]
+name = "zkfol_lileum"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.38"
+lileum-zkfol = { package = "zkfol", git = "https://github.com/LileumLabs/lileum.git", rev = "74a431aabfe9ebfbc17e84e9e3577043101a2e63" }

@@ -188,6 +188,9 @@ defmodule Zkfol.Refusal do
   defp said({:send_failed, %{reason: reason}}),
     do: {:transport, "the send failed: " <> clip(reason)}
 
+  defp said({:backend_unavailable, %{backend: backend}}),
+    do: {:transport, "the #{inspect(backend)} backend has no prover transport yet"}
+
   defp said({:prover_timeout, %{intent: id}}),
     do: {:transport, "the prover did not settle intent #{id} in time"}
 

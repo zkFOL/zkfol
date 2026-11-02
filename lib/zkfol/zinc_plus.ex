@@ -1,13 +1,18 @@
 defmodule Zkfol.ZincPlus do
   @moduledoc """
-  I am the Zinc+ backend behind a NIF: a UAIR goes in as a payload, the verdict comes back
-  as `{:zinc_plus, id, result}`.
+  I lower predicates to UAIR and prove them through the Zinc+ NIF. A queued UAIR's
+  verdict comes back as `{:zinc_plus, id, result}`.
   """
+
+  @behaviour Zkfol.Backend
 
   use TypedStruct
 
   import Bitwise
 
+  alias Zkfol.Ast
+  alias Zkfol.Interpretation
+  alias Zkfol.Prover
   alias Zkfol.Refusal
   alias Zkfol.Uair
   alias Zkfol.Uair.Composed
@@ -77,6 +82,15 @@ defmodule Zkfol.ZincPlus do
     field(:reads, [{non_neg_integer(), [non_neg_integer()], non_neg_integer()}], default: [])
     field(:num_vars, pos_integer())
     field(:export, Path.t() | nil, default: nil)
+  end
+
+  @doc "I emit Zinc+ UAIR for `pred` on `witness` and prove it through the log."
+  @impl true
+  @spec prove(Ast.pred(), Interpretation.t(), keyword()) ::
+          {:ok, Prover.Report.t(), pos_integer()} | {:error, Refusal.t()}
+  def prove(pred, witness, opts) do
+    with {:ok, uair} <- Uair.emit(pred, witness, Keyword.get(opts, :claims, [])),
+         do: Prover.prove_uair(uair, opts)
   end
 
   @doc "I queue an interpreted UAIR on the prover thread."
