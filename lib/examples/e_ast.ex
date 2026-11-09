@@ -11,6 +11,18 @@ defmodule Examples.EAst do
   alias Zkfol.Statement
   alias Zkfol.Semantics
 
+  @doc "A node list follows source order without discarding repeated leaves."
+  @spec nodes_in_source_order() :: [Ast.pred() | Ast.term_t()]
+  example nodes_in_source_order do
+    cell = Ast.cell(1)
+    sum = Ast.add(cell, 2)
+    pred = Ast.eq(sum, cell)
+    nodes = Ast.to_list(pred)
+    assert nodes == [pred, sum, cell, 2, cell]
+    assert Ast.to_list(7) == [7]
+    nodes
+  end
+
   @doc "Both directions: the polynomial vanishes exactly where the predicate holds."
   @spec figure_two_agrees_with_the_oracle() :: Zkfol.Ast.ep()
   example figure_two_agrees_with_the_oracle do

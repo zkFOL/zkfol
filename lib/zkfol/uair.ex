@@ -435,17 +435,10 @@ defmodule Zkfol.Uair do
   defp kind({i, {:at, _base, 0, c}}, len) when c in 1..len//1, do: {:tie, {i, c}}
   defp kind({_i, address}, _len), do: {:aimed, address}
 
-  @spec nodes(Ast.pred() | Ast.term_t()) :: [Ast.pred() | Ast.term_t()]
-  defp nodes(node) do
-    node
-    |> Ast.reduce([], &[&1 | &2])
-    |> Enum.reverse()
-  end
-
   @spec reads(Ast.pred() | Ast.term_t()) :: [Ast.read()]
   defp reads(node) do
     node
-    |> nodes()
+    |> Ast.to_list()
     |> Enum.map(&Ast.read/1)
     |> Enum.reject(&is_nil/1)
   end
@@ -453,7 +446,7 @@ defmodule Zkfol.Uair do
   @spec obligations(Ast.pred()) :: [Ast.pred()]
   defp obligations(pred) do
     pred
-    |> nodes()
+    |> Ast.to_list()
     |> Enum.filter(&obligation?/1)
     |> Enum.uniq()
   end

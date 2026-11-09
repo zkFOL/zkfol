@@ -51,6 +51,11 @@ defmodule Zkfol.Ast do
 
   @type pred :: pred(term_t())
 
+  @type t :: pred() | term_t()
+
+  @typedoc "The arithmetic produced by `arithmetize/1`, with unresolved predicates retained."
+  @type arithmetized :: poly(ep_leaf() | pred(arithmetized()))
+
   @doc "I am the index variable X: the current column."
   @spec x() :: term_t()
   def x, do: :x
@@ -197,7 +202,7 @@ defmodule Zkfol.Ast do
   I am Figure 2's polynomial for `pred`; `Zkfol.Semantics` evaluates the same rules
   independently so the oracle catches a bad lowering.
   """
-  @spec arithmetize(pred()) :: ep()
+  @spec arithmetize(pred()) :: arithmetized()
   def arithmetize(pred) do
     postwalk(pred, fn
       {:eq, t, u} ->
@@ -291,6 +296,14 @@ defmodule Zkfol.Ast do
   @spec reduce(node, acc, (node, acc -> acc)) :: acc when node: var, acc: var
   def reduce(node, acc, fun),
     do: Enum.reduce(children(node), fun.(node, acc), &reduce(&1, &2, fun))
+
+  @doc "I list every node in source order, parents before children, retaining duplicates."
+  @spec to_list(node) :: [node] when node: var
+  def to_list(node) do
+    node
+    |> reduce([], fn node, nodes -> [node | nodes] end)
+    |> Enum.reverse()
+  end
 
   @doc "I am the rows `pred` reads, each once, in the order it writes them."
   @spec reads(pred()) :: [row_ref()]
