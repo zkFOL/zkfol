@@ -7,6 +7,7 @@ defmodule Zkfol.Lileum do
 
   alias Zkfol.Ast
   alias Zkfol.Interpretation
+  alias Zkfol.Lileum.FourSquares
   alias Zkfol.Lileum.Native
   alias Zkfol.Refusal
   alias Zkfol.Semantics
@@ -82,7 +83,6 @@ defmodule Zkfol.Lileum do
   end
 
   @spec unliftable?(Ast.t(), pos_integer()) :: boolean()
-  defp unliftable?({:natural, _term}, _arity), do: true
   defp unliftable?({tag, _cells, _other}, _arity) when tag in [:permutes, :permuted], do: true
   defp unliftable?({:distinct, _cells}, _arity), do: true
 
@@ -109,7 +109,7 @@ defmodule Zkfol.Lileum do
       [polynomial | addresses]
       |> Enum.flat_map(&Ast.to_list/1)
       |> Enum.uniq()
-      |> Enum.filter(&(&1 == :x))
+      |> Enum.filter(&(&1 == :x or match?({:natural, _}, &1)))
 
     {expanded, next} =
       Enum.map_reduce(forms, Interpretation.arity(witness) + 1, fn node, first ->
@@ -138,6 +138,28 @@ defmodule Zkfol.Lileum do
       rows: [Enum.to_list(1..len), Enum.to_list(2..(len + 1)), List.duplicate(1, len)],
       constraints: [Ast.sub(Ast.cell(next), Ast.add(Ast.cell(x), 1)), Ast.sub(Ast.cell(one), 1)],
       copies: [{{one, 1}, {x, 1}} | chain]
+    }
+  end
+
+  # temporary expand around natruals with double squares
+  defp expand({:natural, term}, first, witness) do
+    [sign | roots] = Enum.map(first..(first + 4), &Ast.cell/1)
+    magnitude = Ast.sub(Ast.mul(Ast.sub(1, Ast.mul(2, sign)), term), sign)
+
+    columns =
+      for c <- 1..Interpretation.len(witness) do
+        v = Semantics.eval(term, witness, c)
+        s = if v < 0, do: 1, else: 0
+        [s | FourSquares.decompose((1 - 2 * s) * v - s)]
+      end
+
+    %Translation{
+      value: sign,
+      rows: Enum.zip_with(columns, & &1),
+      constraints: [
+        Ast.mul(sign, Ast.sub(sign, 1)),
+        Ast.sub(magnitude, roots |> Enum.map(&Ast.mul(&1, &1)) |> Enum.reduce(&Ast.add/2))
+      ]
     }
   end
 
