@@ -241,7 +241,7 @@ defmodule Examples.EArrays do
     end
   end
 
-  @doc "A map shares its rows across seventy steps; forged cells and presence gaps fail."
+  @doc "A map shares its rows across seventy steps; forged cells, presence gaps and a walk ended early fail."
   @spec shared_rows() :: Uair.t()
   example shared_rows do
     args = [Enum.to_list(1..70), :_]
@@ -257,9 +257,12 @@ defmodule Examples.EArrays do
 
     witness = Lay.witness(lay)
     {:ok, uair} = Uair.emit(pred, witness)
-    assert Uair.num_cols(uair) == 9
+    assert Uair.num_cols(uair) == 11
     assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair)
-    [_input, %Alloc.Slot{allocation: {:bank, bank, _}}] = Alloc.root(lay.alloc).slots
+
+    [%Alloc.Slot{allocation: {:bank, input, _}}, %Alloc.Slot{allocation: {:bank, bank, _}}] =
+      Alloc.root(lay.alloc).slots
+
     row = Alloc.row(lay.alloc, {bank, 1})
     refute Semantics.valid?(pred, Interpretation.put(witness, row, 17, 999))
 
@@ -267,6 +270,13 @@ defmodule Examples.EArrays do
              pred,
              Interpretation.put(witness, Alloc.presence(lay.alloc, bank), 17, 0)
            )
+
+    ended =
+      Enum.reduce([input, bank], Interpretation.put(witness, row, 71, 999), fn name, forged ->
+        Interpretation.put(forged, Alloc.presence(lay.alloc, name), 71, 0)
+      end)
+
+    refute Semantics.valid?(pred, ended)
 
     column = Enum.find_index(uair.rows, &(&1 == row))
 
@@ -589,6 +599,45 @@ defmodule Examples.EArrays do
       assert {:error, {:unliftable_term, _detail} = reason} = Phi.compile(root)
       reason
     end
+  end
+
+  defrel digit_sum([], 0)
+
+  defrel digit_sum([x | xs], s) do
+    digit_sum(xs, t)
+    s = t + x
+  end
+
+  defrel digits(xs, s) do
+    array([6], xs)
+    each(xs, between(1, 9))
+    digit_sum(xs, s)
+  end
+
+  @doc "Clearing an array's presence ends no walk early: six digits cannot be made to sum to 6000."
+  @spec walks_reach_the_last_element() :: Zkfol.Statement.t()
+  example walks_reach_the_last_element do
+    rels = [digits(), digit_sum()]
+    args = [[4, 2, 9, 3, 5, 7], :_]
+    {:ok, derivation} = Al.derived(rels, args)
+    {:ok, statement} = Phi.relaid(%Zkfol.Statement{rels: rels, args: args}, derivation)
+    alloc = Zkfol.Statement.alloc(statement)
+    pred = Zkfol.Statement.pred(statement)
+    witness = Zkfol.Statement.witness(statement)
+    assert Semantics.valid?(pred, witness)
+
+    [%Alloc.Slot{allocation: {:bank, bank, 6}}, %Alloc.Slot{allocation: {:cell, sum}}] =
+      Alloc.root(alloc).slots
+
+    forged =
+      Enum.reduce(2..7, Interpretation.put(witness, Alloc.row(alloc, sum), 1, 6000), fn x, w ->
+        w
+        |> Interpretation.put(Alloc.row(alloc, {bank, 1}), x, 1000)
+        |> Interpretation.put(Alloc.presence(alloc, bank), x, 0)
+      end)
+
+    refute Semantics.valid?(pred, forged)
+    statement
   end
 
   @spec laid(Rel.t(), [term()], %{non_neg_integer() => [non_neg_integer()]}) ::

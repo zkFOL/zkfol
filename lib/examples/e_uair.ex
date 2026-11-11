@@ -307,9 +307,10 @@ defmodule Examples.EUair do
     assert uair.mode == %Uair.Plain{}
     assert [%{selections: [_one]}] = uair.selected_lookups
 
-    assert uair.point_ties == []
-    assert Uair.num_cols(uair) == 5
-    assert length(uair.program) == 91
+    # The one tie holds the bank's presence at its last element.
+    assert [%Zkfol.ZincPlus.Tie{}] = uair.point_ties
+    assert Uair.num_cols(uair) == 6
+    assert length(uair.program) == 99
     assert {:ok, %Prover.Report{}, _id} = Prover.prove_uair(uair, name: :named_cells)
     uair
   end
