@@ -259,14 +259,16 @@ defmodule Zkfol.Phi do
 
   defp address(:back, _callee, _source, _walk), do: {Ast.address(:x, 1, -1), []}
 
-  # A list argument is read as cells and any other argument as a number.
+  # The list argument of a primitive is read as cells and every other one as a number.
+  @lists %{natural: nil, nth: 1, distinct: 0, permutation: 1}
+
   @spec primitive(Primitive.t(), Walk.t()) :: Walk.t()
   defp primitive(%Primitive{op: op, args: args}, walk) do
-    read = fn arg ->
+    read = fn {arg, k} ->
       value = Match.value(arg, walk.env)
-      if Term.sequence?(arg), do: Match.cells(value), else: Match.scalar(value)
+      if k == @lists[op], do: Match.cells(value), else: Match.scalar(value)
     end
 
-    Walk.constrain(walk, Ast.folded(apply(Ast, op, Enum.map(args, read))))
+    Walk.constrain(walk, Ast.folded(apply(Ast, op, Enum.map(Enum.with_index(args), read))))
   end
 end

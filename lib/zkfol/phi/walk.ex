@@ -46,10 +46,10 @@ defmodule Zkfol.Phi.Walk do
   @spec allocate(t(), [Unfold.name()]) :: t()
   def allocate(walk = %__MODULE__{}, names), do: Enum.reduce(names, walk, &cell/2)
 
-  # A name unfolded through calls is read from the binding of the clause it came from.
+  # The name carries the calls it was unfolded through: the cell is filled from the
+  # binding of the clause it came from.
   @spec cell(Unfold.name(), t()) :: t()
-  defp cell(v, walk) do
-    {calls, name} = if is_atom(v), do: {[], v}, else: v
+  defp cell(v = {calls, name}, walk) do
     ref = {walk.member, {:own, {name, calls ++ [walk.clause]}}}
     source = %Source{calls: calls, binding: {:variable, name}, clause: walk.clause}
     slot = %Slot{name: name, allocation: {:cell, ref}, source: source}

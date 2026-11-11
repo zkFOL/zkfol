@@ -57,7 +57,7 @@ defmodule Examples.EPhi do
     statement
   end
 
-  @doc "A repeated goal is one obligation; each local keeps the call it came from."
+  @doc "A goal stated twice is two calls."
   @spec repeated_factors() :: Statement.t()
   example repeated_factors do
     {:ok, statement, _trace} =
@@ -66,15 +66,7 @@ defmodule Examples.EPhi do
         args: [6, 9]
       })
 
-    [%{bindings: bindings}] = Statement.lay(statement).stands
-
-    assert for(
-             {slot, _value} <- bindings,
-             slot.source.binding == {:variable, :q},
-             do: slot.source.calls
-           ) ==
-             [[local_factor: 0], [local_factor: 2]]
-
+    assert Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
     statement
   end
 

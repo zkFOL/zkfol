@@ -3,7 +3,6 @@ defmodule Zkfol.Unfold do
   I rewrite a program before it is lowered: I unfold the clauses of every relation the
   root reaches and return what is left of each as a `Clause`.
 
-      g, g               =>  g                         the same call twice
       p(args)            =>  args = head, body         only one clause of p can match
       p(args)            =>  a walk over p             p steps through root arrays
       r(args)            =>  p(fixed, args)            r was passed as p(fixed)
@@ -89,13 +88,11 @@ defmodule Zkfol.Unfold do
 
   @type program :: [{key(), [Clause.t()]}]
 
-  # `{:open, dims}` is an array whose dimensions are not numbers yet.
   @typep item ::
            Call.t()
            | Primitive.t()
            | {:eq, Term.t(), Term.t()}
            | {:declared, Term.t(), Term.t(), [non_neg_integer()] | nil}
-           | {:open, Term.t()}
 
   @typep env :: %{name() => Term.t()}
   @typep ctx :: %{scope: %{atom() => Rel.t()}, key: key(), root?: boolean()}
@@ -167,16 +164,7 @@ defmodule Zkfol.Unfold do
       |> Enum.reduce(env, fn {value, cells}, env -> elem(declare(value, cells, env), 1) end)
       |> Map.merge(numbers)
 
-    cond do
-      known != env ->
-        clause(head, body, known, ctx)
-
-      open = Enum.find(items, &match?({:open, _dims}, &1)) ->
-        throw({:refused, {:array_shape, %{dimensions: resolve(elem(open, 1), learned)}}})
-
-      true ->
-        emit(head, items, learned)
-    end
+    if known != env, do: clause(head, body, known, ctx), else: emit(head, items, learned)
   end
 
   ############################################################
@@ -200,43 +188,36 @@ defmodule Zkfol.Unfold do
     unsolved = unsolved ++ for({v, sum} <- sums, do: {{:var, v}, sum})
     {env, unsolved} = solve_sums(env, unsolved, matched)
 
-    unqualify =
-      &rename(&1, fn
-        {:var, {[], v}} -> {:var, v}
-        var -> var
-      end)
+    subst = &substitute(&1, env, matched)
+    stored = for {v, term} <- Enum.sort(env), readable?(v, matched), do: {{:var, v}, subst.(term)}
+    calls = for call <- calls, do: %{call | args: Enum.map(call.args, subst)}
+    equations = for {a, b} <- unsolved, do: {subst.(a), subst.(b)}
+    primitives = for prim <- primitives, do: %{prim | args: Enum.map(prim.args, subst)}
 
-    subst = &unqualify.(substitute(&1, env, matched))
-
-    # Substituting every equation refuses a list used as a number, even in an equation
-    # that adds no constraint.
-    Enum.each(for({:eq, a, b} <- items, term <- [a, b], do: term), subst)
-
-    stored =
-      for {v, term} <- Enum.sort(env),
-          readable?(v, matched),
-          do: {unqualify.({:var, v}), subst.(term)}
-
-    own_cells =
-      for %Primitive{args: args} <- primitives,
-          var = {:var, _} <- args,
-          {:var, r} = root(var, env),
-          not is_map_key(env, r) and not readable?(r, matched),
-          uniq: true,
-          do: elem(unqualify.({:var, r}), 1)
+    # A number that nothing else places takes a cell of its own.
+    numbers =
+      Enum.flat_map(primitives, &Term.names(&1.args)) ++
+        Enum.flat_map(calls, &summed(&1.args)) ++
+        Enum.flat_map(stored ++ equations, &summed(Tuple.to_list(&1)))
 
     %Clause{
       head: head,
       banks:
         for({:declared, {:var, x}, _cells, dims = [_ | _]} <- items, into: %{}, do: {x, dims}),
-      own_cells: own_cells,
-      calls: for(call <- calls, do: %{call | args: Enum.map(call.args, subst)}),
-      equations:
-        Enum.sort_by(stored, &equation_order/1) ++
-          for({a, b} <- unsolved, do: {subst.(a), subst.(b)}),
-      primitives: for(prim <- primitives, do: %{prim | args: Enum.map(prim.args, subst)})
+      own_cells: numbers |> Enum.uniq() |> Enum.reject(&readable?(&1, matched)),
+      calls: calls,
+      equations: Enum.sort_by(stored, &equation_order/1) ++ equations,
+      primitives: primitives
     }
   end
+
+  # The names a term adds or multiplies.
+  @spec summed(term()) :: [name()]
+  defp summed({op, a, b}) when op in [:add, :mul], do: Term.names([a, b])
+  defp summed(terms) when is_list(terms), do: Enum.flat_map(terms, &summed/1)
+  defp summed({:cons, h, t}), do: summed([h, t])
+  defp summed({:papply, _p, fixed}), do: summed(fixed)
+  defp summed(_leaf), do: []
 
   # Equations that open a list come first and sums last, so the names inside a list have
   # values before a sum reads them.
@@ -282,20 +263,20 @@ defmodule Zkfol.Unfold do
 
   # n = m + q  =>  m = n - q. An equation with exactly one name the lowering cannot read
   # is solved for that name when it is a summand: a guard's slack, or a name defined by a
-  # sum. Equations are tried as written before reversed, so `m = k + 1` defines m, not k.
+  # sum.
   @spec solve_sums(env(), [equation()], MapSet.t(name())) :: {env(), [equation()]}
   defp solve_sums(env, equations, matched) do
     subst = &substitute(&1, env, matched)
 
-    as_written =
-      for e = {a, b} <- equations, x = solve_sum(subst.(a), subst.(b), matched), do: {e, x}
+    solved =
+      Enum.find_value(equations, fn equation = {a, b} ->
+        {a, b} = {subst.(a), subst.(b)}
+        with {m, v} <- solve_sum(a, b, matched) || solve_sum(b, a, matched), do: {equation, m, v}
+      end)
 
-    reversed =
-      for e = {a, b} <- equations, x = solve_sum(subst.(b), subst.(a), matched), do: {e, x}
-
-    case as_written ++ reversed do
-      [{e, {name, value}} | _] -> solve_sums(Map.put(env, name, value), equations -- [e], matched)
-      [] -> {env, equations}
+    case solved do
+      {equation, m, v} -> solve_sums(Map.put(env, m, v), equations -- [equation], matched)
+      nil -> {env, equations}
     end
   end
 
@@ -325,12 +306,8 @@ defmodule Zkfol.Unfold do
       else: {:var, r}
   end
 
-  # A name bound to a list is refused in arithmetic.
-  defp substitute(sum = {op, a, b}, env, matched) when op in [:add, :mul] do
-    if Enum.any?([a, b], &(match?({:var, _}, &1) and Term.sequence?(deref(&1, env)))),
-      do: throw({:refused, {:unliftable_term, %{term: resolve(sum, env)}}}),
-      else: apply(Ast, op, [substitute(a, env, matched), substitute(b, env, matched)])
-  end
+  defp substitute({op, a, b}, env, matched) when op in [:add, :mul],
+    do: apply(Ast, op, [substitute(a, env, matched), substitute(b, env, matched)])
 
   defp substitute({:cons, h, t}, env, matched),
     do: {:cons, substitute(h, env, matched), substitute(t, env, matched)}
@@ -349,34 +326,28 @@ defmodule Zkfol.Unfold do
   defp goals(goals, env, path, ctx) do
     env = for {:eq, a, b} <- goals, reduce: env, do: (env -> unify(a, b, env) || env)
 
-    {items, env, _earlier} =
-      Enum.reduce(goals, {[], env, []}, fn goal, {items, env, earlier} ->
-        {more, env, earlier} = goal(goal, env, earlier, path, ctx)
-        {Enum.reverse(more, items), env, earlier}
+    {items, env, _called} =
+      Enum.reduce(goals, {[], env, []}, fn goal, {items, env, called} ->
+        {more, env, called} = goal(goal, env, called, path, ctx)
+        {Enum.reverse(more, items), env, called}
       end)
 
     {Enum.reverse(items), env}
   end
 
-  # `earlier` is the body's calls so far, each with the relation it names. A call that
-  # repeats an earlier one is dropped but still counts as a step.
-  @spec goal(Term.goal(), env(), [{atom(), Term.goal()}], [step()], ctx()) ::
-          {[item()], env(), [{atom(), Term.goal()}]}
-  defp goal({:eq, a, b}, env, earlier, _path, _ctx) do
+  # `called` is the relations the body has called so far: a call's step is its relation and
+  # its position among the calls to it.
+  @spec goal(Term.goal(), env(), [atom()], [step()], ctx()) :: {[item()], env(), [atom()]}
+  defp goal({:eq, a, b}, env, called, _path, _ctx) do
     {items, env} = equate(a, b, env)
-    {items, env, earlier}
+    {items, env, called}
   end
 
-  defp goal(goal = {:call, q, args}, env, earlier, path, ctx) do
+  defp goal({:call, q, args}, env, called, path, ctx) do
     {rel, args} = callee(q, args, env, ctx)
-    step = {rel.name, Enum.count(earlier, &(elem(&1, 0) == rel.name))}
-
-    {items, env} =
-      if not is_tuple(q) and List.keymember?(earlier, goal, 1),
-        do: {[], env},
-        else: call(rel, args, env, path ++ [step], ctx)
-
-    {items, env, [{rel.name, goal} | earlier]}
+    step = {rel.name, Enum.count(called, &(&1 == rel.name))}
+    {items, env} = call(rel, args, env, path ++ [step], ctx)
+    {items, env, [rel.name | called]}
   end
 
   # An equation that cannot hold becomes `0 = 1`, which makes the clause dead.
@@ -392,23 +363,17 @@ defmodule Zkfol.Unfold do
   defp callee(q, args, env, ctx) do
     case resolve(q, env) do
       {:papply, p, fixed} -> {Map.fetch!(ctx.scope, p), fixed ++ args}
-      {:var, r} -> throw({:refused, {:unbound_variable, %{variable: source_name(r)}}})
+      {:var, _unbound} -> throw({:refused, {:unbound_variable, %{goals: [{:call, q, args}]}}})
       named -> {Map.fetch!(ctx.scope, named), args}
     end
   end
 
-  @spec source_name(name()) :: atom() | non_neg_integer()
-  defp source_name(name) when is_atom(name), do: name
-  defp source_name(name), do: elem(name, tuple_size(name) - 1)
-
   @spec call(Rel.t(), [Term.t()], env(), [step()], ctx()) :: {[item()], env()}
-  defp call(%Rel{phi: {Zkfol.Array, :array}}, [dims, v], env, path, ctx),
-    do: array(resolve(dims, env), v, env, path, ctx)
-
   defp call(rel, args, env, path, ctx) do
-    case primitive(rel, args, env) do
+    case primitive(rel, args, env) || array(rel, args, env, path, ctx) do
       nil -> relation_call(rel, args, env, path, ctx)
       {:eq, a, b} -> equate(a, b, env)
+      {items, env} -> {items, env}
       primitive -> {[primitive], env}
     end
   end
@@ -417,28 +382,23 @@ defmodule Zkfol.Unfold do
   #                         Primitives                       #
   ############################################################
 
-  # array(dims, v) binds v to new cell names. On a head name of the root the array is
-  # laid along the columns and its cells are named after that head name.
-  @spec array(Term.t(), Term.t(), env(), [step()], ctx()) :: {[item()], env()}
-  defp array(dims, v, env, path, ctx) do
-    sizes = elements(dims, %{})
+  # array(dims, v) with numbers for dims binds v to new cell names. On a head name of the
+  # root the array is laid along the columns and its cells are named after that head name.
+  @spec array(Rel.t(), [Term.t()], env(), [step()], ctx()) :: {[item()], env()} | nil
+  defp array(%Rel{phi: {Zkfol.Array, :array}}, [dims, v], env, path, ctx) do
+    sizes = elements(resolve(dims, env), %{})
 
-    cond do
-      Term.names(dims) != [] ->
-        {[{:open, dims}], env}
-
-      sizes == nil or not Enum.all?(sizes, &(is_integer(&1) and &1 >= 0)) ->
-        throw({:refused, {:array_shape, %{dimensions: dims}}})
-
-      true ->
-        value = root(v, env)
-        root? = ctx.root? and sizes != [] and match?({:var, x} when is_atom(x), value)
-        cell = if root?, do: &{:cell, elem(value, 1), &1}, else: &{path, &1}
-        cells = bracket(Place.cells(sizes, 0, &{:var, cell.(&1)}))
-        {equations, env} = declare(value, cells, env)
-        {[{:declared, value, cells, if(root?, do: sizes)} | equations], env}
+    if sizes != nil and Enum.all?(sizes, &(is_integer(&1) and &1 >= 0)) do
+      value = root(v, env)
+      root? = ctx.root? and sizes != [] and match?({:var, x} when is_atom(x), value)
+      cell = if root?, do: &{:cell, elem(value, 1), &1}, else: &{path, &1}
+      cells = bracket(Place.cells(sizes, 0, &{:var, cell.(&1)}))
+      {equations, env} = declare(value, cells, env)
+      {[{:declared, value, cells, if(root?, do: sizes)} | equations], env}
     end
   end
+
+  defp array(_rel, _args, _env, _path, _ctx), do: nil
 
   # The array's name is bound to the cells, and what it was bound to before is unified
   # with them.
@@ -456,11 +416,7 @@ defmodule Zkfol.Unfold do
   # nil when the relation's clauses have to be used.
   @spec primitive(Rel.t(), [Term.t()], env()) ::
           Primitive.t() | {:eq, Term.t(), Term.t()} | nil
-  defp primitive(%Rel{phi: {Ast, :natural}}, [x], env) do
-    if Term.sequence?(resolve(x, env)),
-      do: throw({:refused, {:unliftable_term, %{term: resolve(x, env)}}}),
-      else: %Primitive{op: :natural, args: [x]}
-  end
+  defp primitive(%Rel{phi: {Ast, :natural}}, [x], _env), do: %Primitive{op: :natural, args: [x]}
 
   defp primitive(%Rel{phi: {Ast, :nth}}, [i, list, v], env) do
     cells = elements(list, env)
@@ -485,25 +441,15 @@ defmodule Zkfol.Unfold do
   defp primitive(_rel, _args, _env), do: nil
 
   # A lookup only proves over trace cells: the cells of a root array or of a walked row.
-  # Any other list uses the relation's clauses. A list of rows is refused.
+  # Any other list uses the relation's clauses.
   @spec lookup(Rel.t(), [Term.t()], Term.t(), env()) :: Primitive.t() | nil
-  defp lookup(%Rel{name: relation, phi: {Ast, op}}, fixed, list, env) do
-    cells =
-      with elements when is_list(elements) <- elements(list, env),
-           do: Enum.map(elements, &substitute(&1, env, MapSet.new()))
-
-    cond do
-      cells == nil ->
-        nil
-
-      Enum.any?(cells, &Term.sequence?/1) ->
-        throw({:refused, {:unliftable_term, %{term: cells, relation: relation}}})
-
-      Enum.all?(cells, &match?({:var, {tag, _, _}} when tag in [:cell, :row], &1)) ->
-        %Primitive{op: op, args: fixed ++ [bracket(cells)]}
-
-      true ->
-        nil
+  defp lookup(%Rel{phi: {Ast, op}}, fixed, list, env) do
+    with cells when is_list(cells) <- elements(list, env),
+         cells = Enum.map(cells, &substitute(&1, env, MapSet.new())),
+         true <- Enum.all?(cells, &match?({:var, {tag, _, _}} when tag in [:cell, :row], &1)) do
+      %Primitive{op: op, args: fixed ++ [bracket(cells)]}
+    else
+      _other -> nil
     end
   end
 

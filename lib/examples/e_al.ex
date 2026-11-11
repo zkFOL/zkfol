@@ -287,20 +287,15 @@ defmodule Examples.EAl do
     witness
   end
 
-  @doc "Evaluation never lowers: only the prove road wants a fresh body name on a row."
-  @spec a_fresh_name_derives() :: Refusal.t()
+  @doc "A fresh body name takes a cell of its own, filled from the derivation."
+  @spec a_fresh_name_derives() :: Statement.t()
   example a_fresh_name_derives do
     assert Enum.to_list(Zkfol.stream(collatz_next(), [7, :_])) == [[7, 22]]
     assert Enum.to_list(Zkfol.stream(collatz_next(), [8, :_])) == [[8, 4]]
 
-    {:ok, derivation} = Al.derived(collatz_next(), [7], [])
-    {:error, reason} = Zkfol.Phi.relaid(Zkfol.Statement.of(collatz_next()), derivation)
-
-    assert {:unbound_variable, %{goals: goals}} = reason
-    assert {:eq, {:var, :x}, {:add, {:mul, {:var, :k}, 2}, 1}} in goals
-
-    assert Refusal.message(reason) =~ "no clause binds"
-    reason
+    statement = solved(collatz_next(), [7, :_])
+    assert Zkfol.Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
+    statement
   end
 
   @spec solved(Zkfol.Lang.Rel.t() | [Zkfol.Lang.Rel.t()], [Statement.datum() | :_]) ::

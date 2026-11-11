@@ -87,9 +87,6 @@ defmodule Zkfol.Phi.Match do
     if Enum.all?(Term.names(a), &is_map_key(walk.env, &1)),
       do: match(b, value(a, walk.env), walk),
       else: match(a, value(b, walk.env), walk)
-  catch
-    {:refused, {:unbound_variable, _name}} ->
-      throw({:refused, {:unbound_variable, %{goals: [{:eq, a, b}]}}})
   end
 
   @doc "I match each term against its value and stop at the first `:dead`."

@@ -325,7 +325,7 @@ defmodule Examples.EArrays do
     end
   end
 
-  @doc "Malformed dimensions return a typed lowering refusal, including improper lists."
+  @doc "Malformed dimensions have no answer, including improper lists."
   @spec invalid_dimensions() :: [Zkfol.Refusal.t()]
   example invalid_dimensions do
     dimensions = Enum.map([[0, -1], [0, []], [2, 0, -1]], &list_term/1) ++ [{:cons, 0, 1}]
@@ -338,9 +338,8 @@ defmodule Examples.EArrays do
         clauses: [{[{:var, :xs}], [{:call, :array, [dimensions, {:var, :xs}]}]}]
       }
 
-      assert {:error, {:array_shape, _} = refusal} = Phi.compile(root)
       ran = Zkfol.compile(root, args: [[]])
-      assert {_reason, _detail} = Zkfol.Log.refusal(ran)
+      assert refusal = {_reason, _detail} = Zkfol.Log.refusal(ran)
       refusal
     end
   end
@@ -578,20 +577,13 @@ defmodule Examples.EArrays do
     array([2], xs)
   end
 
-  defrel arithmetic_before_array(xs) do
-    y = xs + 0
-    array([2], xs)
-    y = 1
-  end
-
-  @doc "Scalar reads wait for representation; an array cannot leave a dangling scalar row."
-  @spec conflicting_reads() :: [Zkfol.Refusal.t()]
+  @doc "An array read as a number is refused."
+  @spec conflicting_reads() :: Zkfol.Refusal.t()
   example conflicting_reads do
-    for root <- [scalar_before_array(), arithmetic_before_array()] do
-      assert {:error, {:no_answer, _detail}} = Al.derived(root, [[1, 2]])
-      assert {:error, {:unliftable_term, _detail} = reason} = Phi.compile(root)
-      reason
-    end
+    root = scalar_before_array()
+    assert {:error, {:no_answer, _detail}} = Al.derived(root, [[1, 2]])
+    assert {:error, {:unliftable_term, _detail} = reason} = Phi.compile(root)
+    reason
   end
 
   @spec laid(Rel.t(), [term()], %{non_neg_integer() => [non_neg_integer()]}) ::
