@@ -22,7 +22,6 @@ defmodule Zkfol.Alloc do
   Where a parameter stands relative to its member's column.
 
       {:cell, ref}            a scalar on my member’s column
-      {:record, rows}         an array flattened across rows at my member’s column
       {:bank, name, extent}    a fixed sequence ending at column one in the named bank
       {:node, ref}             a term identity on a row at my member’s column
       {:rel, name, rows}       a relation passed by name, its fixed arguments on these rows
@@ -30,7 +29,6 @@ defmodule Zkfol.Alloc do
   """
   @type allocation ::
           {:cell, Ast.row_ref()}
-          | {:record, [Ast.row_ref()]}
           | {:rel, atom(), [Ast.row_ref()]}
           | {:bank, atom(), non_neg_integer()}
           | {:node, Ast.row_ref()}
@@ -56,7 +54,7 @@ defmodule Zkfol.Alloc do
     use TypedStruct
 
     typedstruct enforce: true do
-      field(:name, Zkfol.Phi.Expression.name())
+      field(:name, atom())
       field(:allocation, Zkfol.Alloc.allocation())
       field(:source, Zkfol.Alloc.Source.t() | nil, default: nil)
     end
@@ -136,7 +134,6 @@ defmodule Zkfol.Alloc do
   end
 
   def slot_rows(_alloc, %Slot{allocation: {kind, ref}}) when kind in [:cell, :node], do: [ref]
-  def slot_rows(_alloc, %Slot{allocation: {:record, rows}}), do: rows
   def slot_rows(_alloc, %Slot{}), do: []
 
   @doc "I give pointer and term identities a valid padding value; other rows pad zero."
@@ -259,7 +256,6 @@ defmodule Zkfol.Alloc do
   defp spent(%Member{slots: slots}) do
     Enum.flat_map(slots, fn
       %Slot{allocation: {kind, ref}} when kind in [:cell, :node] -> [ref]
-      %Slot{allocation: {:record, rows}} -> rows
       %Slot{allocation: {:rel, _name, rows}} -> rows
       _slot -> []
     end)

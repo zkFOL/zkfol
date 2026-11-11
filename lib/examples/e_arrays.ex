@@ -4,9 +4,8 @@ defmodule Examples.EArrays do
   use Zkfol.Lang
   import ExUnit.Assertions
 
-  alias Zkfol.{Al, Alloc, Array, Ast, Interpretation, Lay, Phi, Prover, Semantics, Uair}
+  alias Zkfol.{Al, Alloc, Ast, Interpretation, Lang, Lay, Phi, Prover, Semantics, Uair, Unfold}
   alias Zkfol.Lang.Rel
-  alias Zkfol.Phi.{Place, Traversal, Walk}
   alias Examples.{ENodes, EPhi, EUser}
 
   defrel doubled(<<>>, <<>>)
@@ -190,7 +189,7 @@ defmodule Examples.EArrays do
   @spec composed_traversals() :: [Lay.t()]
   example composed_traversals do
     cases = [
-      {doubled(), [[], :_], %{0 => [0], 1 => [0]}, [:doubled]},
+      {doubled(), [[], :_], %{0 => [0], 1 => [0]}, []},
       {doubled(), [[3], :_], %{0 => [1], 1 => [1]}, [:doubled]},
       {mapped(), [[1, 2, 3], :_], %{0 => [3], 1 => [3]}, [:map]},
       {nested(), [[[1, 2, 3], [4, 5, 6]], :_], %{0 => [2, 3], 1 => [2, 3]}, [:map]},
@@ -279,28 +278,32 @@ defmodule Examples.EArrays do
     uair
   end
 
-  @doc "Only aligned tail recursion gets a traversal plan; other calls keep ordinary compilation."
-  @spec traversal_boundary() :: Traversal.t()
-  example traversal_boundary do
-    ref = {:doubled, {:param, :xs}}
-    walk = Array.bind(%Array{dimensions: [2]}, ref)
-    a = Walk.fetch(walk, ref)
+  @doc "Only aligned tail recursion walks its arrays; other calls keep ordinary compilation."
+  @spec walk_boundary() :: [Unfold.key()]
+  example walk_boundary do
+    walking = fn rel, arrays ->
+      root = with_arrays(rel, arrays)
+      {:ok, reached} = Lang.reached(root, [root])
 
-    for {rel, values} <- [
-          {doubled(), [[1, 2], [2, 4]]},
-          {doubled(), [a, :fresh]},
-          {doubled(), [a, Place.shifted(a, -1)]},
-          {EUser.doubled_fun(), [a, Place.shifted(a, -2)]},
-          {EUser.total(), [a, :fresh]},
-          {EPhi.selected_list(), [:fresh, a, a]}
-        ] do
-      assert Traversal.plan(rel, values) == nil
+      for {key = {_name, handed}, _clauses} <-
+            Unfold.program(root, Map.new(reached, &{&1.name, &1})),
+          Enum.any?(handed, &match?({:bank, _array, _inner}, &1)),
+          do: key
     end
 
-    plan = Traversal.plan(doubled(), [a, a])
-    assert Traversal.call(doubled(), [], plan, plan.edge) == Ast.address(:x, 1, -1)
-    assert Traversal.call(doubled(), [:fresh, :fresh], plan, [0 | plan.edge]) == nil
-    plan
+    for {rel, arrays} <- [
+          {doubled(), %{}},
+          {doubled(), %{0 => [2]}},
+          {doubled(), %{0 => [2], 1 => [3]}},
+          {EUser.doubled_fun(), %{0 => [2], 1 => [4]}},
+          {EUser.total(), %{0 => [2]}},
+          {EPhi.selected_list(), %{1 => [2], 2 => [2]}}
+        ] do
+      assert walking.(rel, arrays) == []
+    end
+
+    assert [{:doubled, [{:bank, :a1, []}, {:bank, :a2, []}]}] =
+             walking.(doubled(), %{0 => [2], 1 => [2]})
   end
 
   @doc "The array relation rejects ragged values and checks scalar leaves in AL."

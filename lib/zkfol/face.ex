@@ -321,15 +321,11 @@ defmodule Zkfol.Face do
   defview lowering_view(statement = %Statement{}, builder) do
     case Statement.lowering(statement) do
       nil -> builder.empty()
-      walk -> clause_list(walk.clauses, "Lowering", builder)
+      clauses -> clause_list(clauses, "Lowering", builder)
     end
   end
 
-  defview clauses_view(%Zkfol.Phi.Walk{clauses: clauses}, builder) do
-    clause_list(clauses, "Clauses", builder)
-  end
-
-  @spec clause_list([Zkfol.Phi.Walk.Clause.t()], String.t(), module()) :: ColumnedList.t()
+  @spec clause_list([Zkfol.Phi.Clause.t()], String.t(), module()) :: ColumnedList.t()
   defp clause_list(clauses, title, builder) do
     builder.columned_list()
     |> ColumnedList.title(title)

@@ -12,9 +12,12 @@ defmodule Zkfol.Lang.Term do
 
   @type name :: atom() | {module(), atom()}
 
-  @typedoc "What a term stands on: a name, the empty sequence, a bracket, a partial call, len."
+  @typedoc """
+  What a term stands on: a name, the empty sequence, a bracket, a partial call, len. The
+  source names a variable by an atom; a compiler pass may qualify the name.
+  """
   @type leaf ::
-          {:var, atom()}
+          {:var, atom() | tuple()}
           | nil
           | :len
           | {:cons, t(), t()}
@@ -40,7 +43,7 @@ defmodule Zkfol.Lang.Term do
     do: Enum.reduce(children(node), fun.(node, acc), &reduce(&1, &2, fun))
 
   @doc "I am the variable names a term carries, in the order it writes them."
-  @spec names(term()) :: [atom()]
+  @spec names(term()) :: [atom() | tuple()]
   def names(node) do
     node
     |> reduce([], fn
