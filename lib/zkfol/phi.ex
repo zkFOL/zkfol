@@ -104,52 +104,17 @@ defmodule Zkfol.Phi do
       storage = Storage.of(program, scope, args)
 
       units =
-        program
-        |> Enum.map(fn {key = {name, _handed}, clauses} ->
-          member(key, clauses, scope[name].clauses, storage)
-        end)
-        |> called([root.name], [])
+        for {key = {name, _handed}, clauses} <- program,
+            do: member(key, clauses, scope[name].clauses, storage)
 
       preds = Enum.map(units, & &1.pred)
       banks = Enum.flat_map(units, & &1.banks)
-      read = MapSet.new(Ast.reads(Ast.conj(preds)))
-      members = Enum.flat_map(units, &[unread(&1.member, read) | &1.banks])
+      members = Enum.flat_map(units, &[&1.member | &1.banks])
       {pred, members} = Nodes.lower(Ast.conj(preds ++ Enum.map(banks, &runs/1)), members)
       {:ok, pred, Alloc.numbered(members, root.name), Enum.flat_map(units, & &1.clauses)}
     end
   catch
     {:refused, refusal} -> {:error, refusal}
-  end
-
-  # The members reachable from the root through live clauses; the rest are dropped.
-  @spec called([unit()], [atom()], [unit()]) :: [unit()]
-  defp called(_units, [], kept), do: Enum.reverse(kept)
-
-  defp called(units, [name | queue], kept) do
-    if Enum.any?(kept, &(&1.member.name == name)) do
-      called(units, queue, kept)
-    else
-      found = Enum.find(units, &(&1.member.name == name))
-      callees = for {_clause, sites} <- found.member.sites, site <- sites, do: site.callee
-      called(units, queue ++ callees, [found | kept])
-    end
-  end
-
-  # A parameter cell that no constraint reads gets no row.
-  @spec unread(Member.t(), MapSet.t()) :: Member.t()
-  defp unread(member, read) do
-    slots =
-      for slot <- member.slots do
-        case slot.allocation do
-          {:cell, ref = {_member, {:param, _name}}} ->
-            if ref in read, do: slot, else: %{slot | allocation: :none}
-
-          _kept ->
-            slot
-        end
-      end
-
-    %{member | slots: slots}
   end
 
   # A bank's presence is one on a single run starting at column two, so a forger cannot

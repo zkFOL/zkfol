@@ -5,8 +5,6 @@ defmodule Zkfol.Unfold.Inline do
 
   ### Public API
 
-  - `native/5`: the rule for a relation the solver answers natively. Its derivation holds
-    no call to point at, so the clause has to be unfolded.
   - `only_clause/5`: the rule for a call that only one clause can match.
   - `rename/2`: apply a function to every variable of a term or goal.
   """
@@ -19,14 +17,6 @@ defmodule Zkfol.Unfold.Inline do
   @depth 64
 
   @typep clause :: {[Term.t()], [Term.goal()]}
-
-  @doc "I unfold the one clause of a relation the solver answers natively."
-  @spec native(Rel.t(), [Term.t()], Unfold.env(), [Unfold.step()], Unfold.ctx()) ::
-          {[Unfold.item()], Unfold.env(), [Term.goal()]} | nil
-  def native(%Rel{al: al, clauses: [clause]}, args, env, path, _ctx) when al != nil,
-    do: {[], env, unfolded(clause, args, path)}
-
-  def native(_rel, _args, _env, _path, _ctx), do: nil
 
   @doc "I unfold a call when only one clause's head, equations and guards fit it."
   @spec only_clause(Rel.t(), [Term.t()], Unfold.env(), [Unfold.step()], Unfold.ctx()) ::

@@ -102,10 +102,10 @@ defmodule Zkfol.Unfold do
       needed: &natural/5,
       cheaper: &Lookup.nth/5,
       cheaper: &Lookup.lookup/5,
-      cheaper: &Array.array/5,
+      # Needed until a passed relation can carry a list: `array`'s own clauses pass one.
+      needed: &Array.array/5,
       cheaper: &Traversal.step/5,
       cheaper: &Traversal.start/5,
-      needed: &Inline.native/5,
       cheaper: &Inline.only_clause/5,
       needed: &member_call/5
     ]
