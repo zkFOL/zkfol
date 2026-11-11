@@ -108,24 +108,35 @@ defmodule Zkfol.Phi do
             do: member(key, clauses, scope[name].clauses, storage)
 
       preds = Enum.map(units, & &1.pred)
-      banks = Enum.flat_map(units, & &1.banks)
       members = Enum.flat_map(units, &[&1.member | &1.banks])
-      {pred, members} = Nodes.lower(Ast.conj(preds ++ Enum.map(banks, &runs/1)), members)
+
+      runs =
+        for unit <- units,
+            %Slot{allocation: {:bank, bank, extent}} <- unit.member.slots,
+            do: runs(bank, extent)
+
+      {pred, members} = Nodes.lower(Ast.conj(preds ++ runs), members)
       {:ok, pred, Alloc.numbered(members, root.name), Enum.flat_map(units, & &1.clauses)}
     end
   catch
     {:refused, refusal} -> {:error, refusal}
   end
 
-  # A bank's presence is one on a single run starting at column two, so a forger cannot
-  # shorten a walk by dropping presence in the middle.
-  @spec runs(Bank.t()) :: Ast.pred()
-  defp runs(%Bank{name: name}) do
-    Ast.disj([
-      Ast.eq({:cell, {:in, name}}, 0),
-      Ast.eq(Ast.at({:in, name}, :x, 1, -1), 1),
-      Ast.eq(:x, 2)
-    ])
+  # A bank's presence is one on the run from column two to its last element: the run
+  # starts at column two, has no gap and reaches the last element, so a forger cannot
+  # shorten a walk.
+  @spec runs(atom(), non_neg_integer()) :: Ast.pred()
+  defp runs(name, extent) do
+    unbroken =
+      Ast.disj([
+        Ast.eq({:cell, {:in, name}}, 0),
+        Ast.eq(Ast.at({:in, name}, :x, 1, -1), 1),
+        Ast.eq(:x, 2)
+      ])
+
+    if extent == 0,
+      do: unbroken,
+      else: Ast.conj([unbroken, Ast.eq(Ast.at({:in, name}, :x, 0, extent + 1), 1)])
   end
 
   ############################################################
