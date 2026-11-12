@@ -480,7 +480,8 @@ defmodule Examples.EUser do
         end
       end
 
-    assert {:ok, phi} = Phi.lower(spiral, [spiral, doubled_fun()])
+    assert {:ok, pred, alloc} = Phi.compile(spiral, [spiral, doubled_fun()])
+    phi = Alloc.link(pred, alloc)
     assert Enum.take(Zkfol.stream([spiral, doubled_fun()], [[], :_]), 1) == [[[], 0]]
     phi
   end
