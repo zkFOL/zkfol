@@ -328,4 +328,28 @@ defmodule Examples.EPassed do
       statement
     end
   end
+
+  defrel listed([x | _], x)
+
+  defrel listed([_ | xs], x) do
+    listed(xs, x)
+  end
+
+  defrel among(vs, x) do
+    listed(vs, x)
+  end
+
+  defrel all_among(xs, vs) do
+    each(xs, among(vs))
+  end
+
+  @doc "A passed relation holds a list as readily as a number."
+  @spec relation_holding_a_list() :: Statement.t()
+  example relation_holding_a_list do
+    statement = %Statement{rels: [all_among(), among(), listed()], args: [[2, 3], [1, 2, 3, 4]]}
+    {:ok, statement, _trace} = Pipeline.run(EUser.plain(), statement)
+
+    assert Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
+    statement
+  end
 end

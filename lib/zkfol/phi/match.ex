@@ -2,8 +2,8 @@ defmodule Zkfol.Phi.Match do
   @moduledoc """
   I match source terms against values and add the constraints the match needs.
 
-  A value is a scalar expression, a heap term `{:node, id}`, a view of a walked array, a
-  pair or `[]`, or a passed relation with the cells of its fixed arguments.
+  A value is a scalar expression, a heap term `{:node, id}`, a view of a walked array, or
+  a pair or `[]`.
 
   | pattern    | scalar `e` | walked array            | heap term `i`                |
   |------------|------------|-------------------------|------------------------------|
@@ -35,7 +35,6 @@ defmodule Zkfol.Phi.Match do
           | View.t()
           | {:pair, value(), value()}
           | []
-          | {:rel, atom(), [value()]}
 
   @typedoc "The walk after a match, or `:dead` when the match cannot hold."
   @type result :: Walk.t() | :dead
@@ -57,7 +56,6 @@ defmodule Zkfol.Phi.Match do
   def value({:cons, h, t}, env), do: {:pair, value(h, env), value(t, env)}
   def value({:add, a, b}, env), do: Ast.add(scalar(value(a, env)), scalar(value(b, env)))
   def value({:mul, a, b}, env), do: Ast.mul(scalar(value(a, env)), scalar(value(b, env)))
-  def value({:papply, p, fixed}, env), do: {:rel, p, Enum.map(fixed, &value(&1, env))}
 
   @doc "I read a value as a number and refuse a list."
   @spec scalar(value()) :: Ast.term_t()
@@ -78,7 +76,6 @@ defmodule Zkfol.Phi.Match do
   @doc "I am a member's value as seen from a call through `pointer`."
   @spec frame(value(), Ast.address()) :: value()
   def frame({:node, id}, pointer), do: {:node, frame(id, pointer)}
-  def frame({:rel, p, fixed}, pointer), do: {:rel, p, Enum.map(fixed, &frame(&1, pointer))}
   def frame({:cell, ref}, {:at, {:cell, row}, 1, 0}), do: Ast.cell(ref, row)
 
   @doc "I constrain `a` and `b` to be equal: the side whose names are all bound is the value."
@@ -118,9 +115,6 @@ defmodule Zkfol.Phi.Match do
     with {head, tail, walk} <- peel(b, walk), do: equates([{h, head}, {t, tail}], walk)
   end
 
-  defp equate({:rel, p, a}, {:rel, p, b}, walk) when length(a) == length(b),
-    do: equates(Enum.zip(a, b), walk)
-
   defp equate({:node, a}, {:node, b}, walk), do: Walk.constrain(walk, [Ast.eq(a, b)])
 
   defp equate({:node, id}, view = %View{}, walk),
@@ -141,7 +135,7 @@ defmodule Zkfol.Phi.Match do
 
   @spec structure?(value()) :: boolean()
   defp structure?(value),
-    do: value == [] or (is_tuple(value) and elem(value, 0) in [:pair, :rel])
+    do: value == [] or match?({:pair, _, _}, value)
 
   # The first element and the rest of a list value.
   @spec peel(value(), Walk.t()) :: {value(), value(), Walk.t()} | :dead

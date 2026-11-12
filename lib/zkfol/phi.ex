@@ -185,15 +185,7 @@ defmodule Zkfol.Phi do
   @spec clause(Unfold.Clause.t(), non_neg_integer(), Interface.t(), storage()) ::
           Walk.t() | :dead
   defp clause(clause, c, interface, storage) do
-    # The fixed arguments of a passed relation are cells of the member.
-    captured =
-      for {{:var, r}, {:rel, _p, cells}} <- Enum.zip(clause.head, interface.values),
-          {cell, i} <- Enum.with_index(cells, 1),
-          into: %{},
-          do: {{:captured, r, i}, cell}
-
-    walk = %Walk{member: interface.name, clause: c, env: captured}
-    walk = Walk.allocate(walk, clause.own_cells)
+    walk = Walk.allocate(%Walk{member: interface.name, clause: c}, clause.own_cells)
 
     with walk = %Walk{} <- Match.matches(stored(clause.head, interface.values), walk),
          walk = %Walk{} <- Walk.each(clause.calls, walk, &call(&1, &2, storage)),
@@ -208,8 +200,8 @@ defmodule Zkfol.Phi do
   defp stored(terms, values),
     do: for({term, value} <- Enum.zip(terms, values), value != nil, do: {term, value})
 
-  # The callee is present at the call's address. A pointer call also matches its arguments
-  # against the callee's parameters there; a walk reads the caller's cells directly.
+  # The callee is present at the call's address, and the arguments are matched against
+  # its parameters there. A walk passes none: it reads the caller's cells directly.
   @spec call(Call.t(), Walk.t(), storage()) :: Match.result()
   defp call(%Call{source: source, member: key, args: args, at: at}, walk, storage) do
     %Interface{name: callee, values: values} = Map.fetch!(storage, key)
@@ -217,8 +209,8 @@ defmodule Zkfol.Phi do
     site = %Site{callee: callee, address: address, source: source}
     walk = %{walk | sites: [site | walk.sites], slots: slots ++ walk.slots}
     walk = Walk.constrain(walk, [Ast.eq(Ast.at({:in, callee}, base, m, a), 1)])
-    there = if at == :pointer, do: stored(args, values), else: []
-    Match.matches(for({arg, value} <- there, do: {arg, Match.frame(value, address)}), walk)
+    there = for {arg, value} <- stored(args, values), do: {arg, Match.frame(value, address)}
+    Match.matches(there, walk)
   end
 
   # The callee's column: named by a pointer cell of the call, the first column of a walk,

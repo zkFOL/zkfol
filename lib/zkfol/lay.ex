@@ -353,12 +353,12 @@ defmodule Zkfol.Lay do
     end
   end
 
-  @spec source_value(
-          {:argument, non_neg_integer()} | {:variable, atom()},
-          Derivation.fact(),
-          map()
-        ) :: term()
+  @spec source_value(Alloc.binding(), Derivation.fact(), map()) :: term()
   defp source_value({:argument, k}, fact, index), do: elem(index.arguments[fact], k)
+
+  # A passed relation is the tuple {method, object, fixed arguments...}.
+  defp source_value({:fixed, k, i}, fact, index), do: elem(elem(index.arguments[fact], k), i + 2)
+
   defp source_value({:variable, name}, fact, index), do: Map.fetch!(index.bindings[fact], name)
 
   # A call's source path follows the derivation through any wrappers that were inlined.
@@ -431,12 +431,6 @@ defmodule Zkfol.Lay do
   # The allocation determines placement: scalar, term identity, bank, or no storage.
   @spec spread({Slot.t(), term()}, pos_integer(), Alloc.t()) ::
           [{{pos_integer(), pos_integer()}, term()}]
-  # A closure is {method, object, fixed arguments...}; the fixed arguments go to the rows.
-  defp spread({%Slot{allocation: {:rel, _name, rows}}, closure}, x, alloc) do
-    fixed = closure |> Tuple.to_list() |> Enum.drop(2)
-    for {value, row} <- Enum.zip(fixed, rows), do: {{Alloc.row(alloc, row), x}, value}
-  end
-
   defp spread({%Slot{allocation: {:cell, ref}}, value}, x, alloc),
     do: [{{Alloc.row(alloc, ref), x}, value}]
 

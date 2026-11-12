@@ -12,7 +12,7 @@ defmodule Zkfol.Unfold.Traversal do
 
   - `start/5`: the rule for a call that starts a traversal.
   - `step/5`: the rule for the traversing member's call to itself.
-  - `bindings/2`: what the head of a traversing member is bound to.
+  - `rows/2`: the cell names of the rows a traversing member reads.
   """
 
   alias Zkfol.Lang.{Rel, Term}
@@ -35,7 +35,7 @@ defmodule Zkfol.Unfold.Traversal do
            true <- arrays == Enum.uniq_by(arrays, &elem(&1, 0)),
            [extent] <- arrays |> Enum.map(&elem(&1, 1)) |> Enum.uniq() do
         handed = Enum.map(handed, &with({array = {:bank, _, _}, _left} <- &1, do: array))
-        {[%Call{source: path, member: {name, handed}, args: args, at: {:entry, extent}}], env, []}
+        {[%Call{source: path, member: {name, handed}, args: [], at: {:entry, extent}}], env, []}
       else
         _other -> nil
       end
@@ -47,29 +47,19 @@ defmodule Zkfol.Unfold.Traversal do
   @doc "I continue a traversal one column back, for the member's own clause only."
   @spec step(Rel.t(), [Term.t()], Unfold.env(), [Unfold.step()], Unfold.ctx()) ::
           {[Unfold.item()], Unfold.env(), [Term.goal()]} | nil
-  def step(%Rel{name: name}, args, env, path = [_own], %{key: key = {name, handed}}) do
+  def step(%Rel{name: name}, _args, env, path = [_own], %{key: key = {name, handed}}) do
     if Enum.any?(handed, &match?({:bank, _, _}, &1)),
-      do: {[%Call{source: path, member: key, args: args, at: :back}], env, []}
+      do: {[%Call{source: path, member: key, args: [], at: :back}], env, []}
   end
 
   def step(_rel, _args, _env, _path, _ctx), do: nil
 
-  @doc "I bind a traversing member's fixed parameters to constants and its rows to cell names."
-  @spec bindings([Term.t()], [Unfold.handed()]) :: Unfold.env()
-  def bindings(head, handed) do
-    for pair <- Enum.zip(head, handed), reduce: %{} do
-      env ->
-        case pair do
-          {{:var, v}, {:fixed, term}} ->
-            Map.put(env, v, term)
-
-          {{:cons, {:var, v}, _rest}, {:bank, _array, inner = [_ | _]}} ->
-            Map.put(env, v, Bindings.bracket(Place.cells(inner, 0, &{:var, {:row, v, &1}})))
-
-          _other ->
-            env
-        end
-    end
+  @doc "I bind the row a traversing member reads at its column to cell names."
+  @spec rows([Term.t()], [Unfold.handed()]) :: Unfold.env()
+  def rows(head, handed) do
+    for {{:cons, {:var, v}, _rest}, {:bank, _array, inner = [_ | _]}} <- Enum.zip(head, handed),
+        into: %{},
+        do: {v, Bindings.bracket(Place.cells(inner, 0, &{:var, {:row, v, &1}}))}
   end
 
   # One parameter: its base pattern, its head pattern, what the clause passes to itself,

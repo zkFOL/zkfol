@@ -38,8 +38,12 @@ defmodule Zkfol.Unfold.Solve do
 
     subst = &substitute(&1, bound, matched)
 
+    # A name bound to a relation only says which relation its calls name.
     stored =
-      for {v, term} <- Enum.sort(bound), readable?(v, matched), do: {{:var, v}, subst.(term)}
+      for {v, term} <- Enum.sort(bound),
+          readable?(v, matched),
+          not match?({:papply, _, _}, term),
+          do: {{:var, v}, subst.(term)}
 
     calls = for call <- calls, do: %{call | args: Enum.map(call.args, subst)}
     equations = for {a, b} <- unsolved, do: {subst.(a), subst.(b)}

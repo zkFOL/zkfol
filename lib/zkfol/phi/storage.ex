@@ -35,7 +35,7 @@ defmodule Zkfol.Phi.Storage do
   stored as a number and `:element`, an element of a list, as a heap term, unless another
   use says more.
   """
-  @type kind :: :number | :term | :relation | :used | :element | {:bank, [non_neg_integer()]}
+  @type kind :: :number | :term | :used | :element | {:bank, [non_neg_integer()]}
 
   # A parameter of a member, or a name in one of its clauses.
   @typep holder ::
@@ -59,9 +59,26 @@ defmodule Zkfol.Phi.Storage do
 
   @spec interface(Unfold.key(), atom(), Rel.t(), %{holder() => kind()}, atom()) :: Interface.t()
   defp interface(key = {relation, handed}, name, rel, kinds, root) do
+    # A constant is no parameter, and a passed relation's fixed arguments are parameters
+    # in its place.
+    sources =
+      for {{sym, handed}, k} <- Enum.with_index(Enum.zip(parameter_names(rel), handed)),
+          source <-
+            (case handed do
+               {:fixed, _term} ->
+                 []
+
+               {:relation, _p, n} ->
+                 for(i <- 1..n//1, do: {:"#{sym}.#{i}", nil, {:fixed, k, i - 1}})
+
+               other ->
+                 [{sym, other, {:argument, k}}]
+             end),
+          do: source
+
     parameters =
-      for {{sym, handed}, k} <- Enum.with_index(Enum.zip(parameter_names(rel), handed)) do
-        slot = %Slot{name: sym, allocation: :none, source: %Source{binding: {:argument, k}}}
+      for {{sym, handed, binding}, k} <- Enum.with_index(sources) do
+        slot = %Slot{name: sym, allocation: :none, source: %Source{binding: binding}}
         parameter(handed, kinds[{key, k}], {name, {:param, sym}}, slot, root)
       end
 
@@ -82,18 +99,10 @@ defmodule Zkfol.Phi.Storage do
   # A parameter's value, its slot and the bank it declares.
   @spec parameter(Unfold.handed(), kind() | nil, Ast.row_ref(), Slot.t(), atom()) ::
           {Match.value() | nil, Slot.t(), [Bank.t()]}
-  defp parameter({:relation, p, n}, _kind, {name, {:param, sym}}, slot, _root) do
-    rows = for i <- 1..n//1, do: {name, {:own, {:"#{sym}.#{i}", []}}}
-    {{:rel, p, Enum.map(rows, &Ast.cell/1)}, %{slot | allocation: {:rel, p, rows}}, []}
-  end
-
   defp parameter({:bank, array, inner}, _kind, _ref, slot, root) do
     bank = Bank.of({root, {:param, array}})
     {%Place.View{bank: bank, head: Ast.address(:x, 1, 0), dimensions: inner}, slot, []}
   end
-
-  defp parameter({:fixed, term}, _kind, _ref, slot, _root),
-    do: {Match.value(term, %{}), slot, []}
 
   defp parameter(nil, kind, ref, slot, _root) when kind in [:number, :used],
     do: {Ast.cell(ref), %{slot | allocation: {:cell, ref}}, []}
@@ -199,7 +208,6 @@ defmodule Zkfol.Phi.Storage do
   defp shape({op, _, _}) when op in [:add, :mul], do: :number
   defp shape({:cons, _, _}), do: :term
   defp shape(nil), do: :term
-  defp shape({:papply, _, _}), do: :relation
 
   # The facts about the names inside a term.
   @spec inner(term(), (Unfold.name() -> holder())) :: [fact()]
@@ -209,7 +217,6 @@ defmodule Zkfol.Phi.Storage do
   defp inner({:cons, h, t}, name),
     do: for({:var, v} <- [h, t], do: {name.(v), :element}) ++ inner(h, name) ++ inner(t, name)
 
-  defp inner({:papply, _p, fixed}, name), do: Enum.flat_map(fixed, &inner(&1, name))
   defp inner(_leaf, _name), do: []
 
   @spec propagate(%{holder() => kind()}, [fact()]) :: %{holder() => kind()}

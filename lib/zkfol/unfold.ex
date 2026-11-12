@@ -24,13 +24,13 @@ defmodule Zkfol.Unfold do
 
   @typedoc """
   A variable name. Head names stay atoms; any other name carries the calls it was unfolded
-  through. Cells of a root array, cells of a traversed row and the fixed arguments of a
-  passed relation are named after the head name they belong to.
+  through. Cells of a root array and cells of a traversed row are named after the head
+  name they belong to.
   """
   @type name ::
           atom()
           | {[step()], atom() | non_neg_integer()}
-          | {:cell | :row | :captured, atom(), non_neg_integer()}
+          | {:cell | :row, atom(), non_neg_integer()}
 
   @typedoc """
   What a member's parameter is specialised to: a passed relation with n fixed arguments,
@@ -52,7 +52,10 @@ defmodule Zkfol.Unfold do
   @type at :: :pointer | {:entry, non_neg_integer()} | :back
 
   typedstruct module: Call, enforce: true do
-    @moduledoc "I am a call to a member. `source` is the calls it was unfolded through."
+    @moduledoc """
+    I am a call to a member. `source` is the calls it was unfolded through and `args` the
+    arguments it passes.
+    """
     field(:source, [Zkfol.Unfold.step()])
     field(:member, Zkfol.Unfold.key())
     field(:args, [Zkfol.Lang.Term.t()])
@@ -102,8 +105,7 @@ defmodule Zkfol.Unfold do
       needed: &natural/5,
       cheaper: &Lookup.nth/5,
       cheaper: &Lookup.lookup/5,
-      # Needed until a passed relation can carry a list: `array`'s own clauses pass one.
-      needed: &Array.array/5,
+      cheaper: &Array.array/5,
       cheaper: &Traversal.step/5,
       cheaper: &Traversal.start/5,
       cheaper: &Inline.only_clause/5,
@@ -129,8 +131,9 @@ defmodule Zkfol.Unfold do
 
       unfolded =
         for {head, body} <- clauses do
-          env = Map.merge(passed(head, handed), Traversal.bindings(head, handed))
-          clause(head, qualify_locals(head, body), env, ctx)
+          {parameters, env} = passed(head, handed)
+          env = Map.merge(env, Traversal.rows(head, handed))
+          clause(parameters, qualify_locals(parameters, body), env, ctx)
         end
 
       called = for %Clause{calls: calls} <- unfolded, %Call{member: member} <- calls, do: member
@@ -145,13 +148,27 @@ defmodule Zkfol.Unfold do
     Inline.rename(body, fn var = {:var, v} -> if v in heads, do: var, else: {:var, {[], v}} end)
   end
 
-  # A parameter that was passed a relation stands for it; the relation's fixed arguments
-  # are cells of the member.
-  @spec passed([Term.t()], [handed()]) :: env()
+  # What a parameter is handed decides what is left of it in the head. A constant leaves
+  # nothing. A passed relation leaves its fixed arguments. In both cases the name stands
+  # for what was handed.
+  @spec passed([Term.t()], [handed()]) :: {[Term.t()], env()}
   defp passed(head, handed) do
-    for {{:var, r}, {:relation, p, n}} <- Enum.zip(head, handed), into: %{} do
-      {r, {:papply, p, for(i <- 1..n//1, do: {:var, {:captured, r, i}})}}
-    end
+    parts =
+      for pair <- Enum.zip(head, handed) do
+        case pair do
+          {{:var, v}, {:fixed, term}} ->
+            {[], %{{[], v} => term}}
+
+          {{:var, r}, {:relation, p, n}} ->
+            fixed = for i <- 1..n//1, do: {:var, :"#{r}.#{i}"}
+            {fixed, %{{[], r} => {:papply, p, fixed}}}
+
+          {pattern, _other} ->
+            {[pattern], %{}}
+        end
+      end
+
+    {Enum.flat_map(parts, &elem(&1, 0)), Enum.reduce(parts, %{}, &Map.merge(elem(&1, 1), &2))}
   end
 
   # I unfold the body until a pass learns nothing new: numbers and array cells found in one
@@ -220,18 +237,22 @@ defmodule Zkfol.Unfold do
 
   defp natural(_rel, _args, _env, _path, _ctx), do: nil
 
-  # A pointer call to the member for the relation and the relations it is passed.
+  # A pointer call to the member for the relation and the relations it is passed. A
+  # passed relation's fixed arguments are passed in its place.
   @spec member_call(Rel.t(), [Term.t()], env(), [step()], ctx()) ::
           {[item()], env(), [Term.goal()]}
   defp member_call(rel, args, env, path, _ctx) do
-    handed =
-      for arg <- args do
-        case Bindings.resolve(arg, env) do
-          {:papply, p, fixed} -> {:relation, p, length(fixed)}
-          _value -> nil
+    {handed, args} =
+      Enum.unzip(
+        for arg <- args do
+          case Bindings.resolve(arg, env) do
+            {:papply, p, fixed} -> {{:relation, p, length(fixed)}, fixed}
+            _value -> {nil, [arg]}
+          end
         end
-      end
+      )
 
-    {[%Call{source: path, member: {rel.name, handed}, args: args, at: :pointer}], env, []}
+    call = %Call{source: path, member: {rel.name, handed}, args: Enum.concat(args), at: :pointer}
+    {[call], env, []}
   end
 end

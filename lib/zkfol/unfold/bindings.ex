@@ -95,7 +95,7 @@ defmodule Zkfol.Unfold.Bindings do
     end
   end
 
-  @doc "I say whether a name has a cell of its own: a head name, or a cell, row or captured name."
+  @doc "I say whether a name has a cell of its own: a head name, or a cell or row name."
   @spec stored?(Unfold.name()) :: boolean()
   def stored?(name), do: is_atom(name) or tuple_size(name) == 3
 
