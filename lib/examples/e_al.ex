@@ -172,18 +172,31 @@ defmodule Examples.EAl do
     end
   end
 
+  @doc "I call `hop` from another relation, so `hop` is not the root and still uses pointers."
+  @spec hopped_rel() :: Zkfol.Lang.Rel.t()
+  example hopped_rel do
+    rel :hopped do
+      hopped(x, v) do
+        hop(x, v)
+      end
+    end
+  end
+
   @doc "Section 4 on the wire: the deref emits bits, a result row per read, and the Word lookup."
   @spec composed_hop_emits() :: Uair.t()
   example composed_hop_emits do
     {:ok, statement, _trace} =
-      Zkfol.Pipeline.run(Zkfol.Pipeline.default(), %Statement{rels: [hop_rel()], args: [5]})
+      Zkfol.Pipeline.run(Zkfol.Pipeline.default(), %Statement{
+        rels: [hopped_rel(), hop_rel()],
+        args: [5]
+      })
 
     witness = Statement.witness(statement)
     {:ok, uair} = Uair.emit(Statement.pred(statement), witness)
     len = Interpretation.len(witness)
 
     pointers = uair.mode.reads |> Enum.map(& &1.row) |> Enum.uniq()
-    assert length(pointers) == 1
+    assert length(pointers) == 2
 
     for pointer <- pointers do
       slack = Enum.map(Enum.at(uair.columns, pointer), &(&1 - 1))
@@ -239,18 +252,21 @@ defmodule Examples.EAl do
   @doc "A claimed row a read dereferences hands its claim to a bonded copy and stays private."
   @spec a_claimed_read_row_rides_a_copy() :: Prover.Report.t()
   example a_claimed_read_row_rides_a_copy do
-    statement = solved(hop_rel(), [5])
+    statement = solved([hopped_rel(), hop_rel()], [5])
     witness = Statement.witness(statement)
-    {:ok, uair} = Uair.emit(Statement.pred(statement), witness, [{"out", 1, 2}])
+    {:ok, unclaimed} = Uair.emit(Statement.pred(statement), witness)
+    [%{value_row: read} | _rest] = unclaimed.mode.reads
+    row = Enum.at(unclaimed.rows, read)
+    {:ok, uair} = Uair.emit(Statement.pred(statement), witness, [{"out", row, 2}])
 
     assert uair.num_public == 1
     assert [copy | _rest] = uair.rows
     assert copy > Interpretation.arity(witness)
 
     assert Enum.at(uair.columns, 0) ==
-             Enum.at(uair.columns, Enum.find_index(uair.rows, &(&1 == 1)))
+             Enum.at(uair.columns, Enum.find_index(uair.rows, &(&1 == row)))
 
-    assert uair.claims == [{"out", Interpretation.at(witness, 1, 2)}]
+    assert uair.claims == [{"out", Interpretation.at(witness, row, 2)}]
     assert Enum.all?(uair.mode.reads, &(&1.value_row >= uair.num_public))
 
     {:ok, report, _id} = Prover.prove_uair(uair, name: :claimed_read)
