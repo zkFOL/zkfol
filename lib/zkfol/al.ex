@@ -179,7 +179,7 @@ defmodule Zkfol.Al do
         names = Map.new(source.rels, &{method(&1.name), {&1.name, &1.arity}})
 
         result =
-          with {:ok, state} <- invoke(program, source, trace: [:domino]),
+          with {:ok, state} <- invoke(program, source, trace: [:domino], failure: :bare),
                do: {:ok, Derivation.of(state, names)}
 
         exit({:derived, result})
