@@ -7,7 +7,6 @@ defmodule Zkfol.Lileum do
 
   alias Zkfol.Ast
   alias Zkfol.Interpretation
-  alias Zkfol.Lileum.FourSquares
   alias Zkfol.Lileum.Native
   alias Zkfol.Refusal
   alias Zkfol.Semantics
@@ -30,6 +29,7 @@ defmodule Zkfol.Lileum do
     field(:arithmetic_constraints, [Zkfol.Lileum.expression()])
     field(:copy_constraints, [Zkfol.Lileum.connection()])
     field(:reads, [Zkfol.Lileum.connection()])
+    field(:sign_constraints, [Zkfol.Lileum.cell()])
   end
 
   typedstruct enforce: true do
@@ -42,6 +42,7 @@ defmodule Zkfol.Lileum do
     field(:constraints, [Ast.arithmetized()], default: [])
     field(:copies, [{Zkfol.Lileum.named(), Zkfol.Lileum.named()}], default: [])
     field(:reads, [{Zkfol.Lileum.named(), Zkfol.Lileum.named()}], default: [])
+    field(:signs, [Zkfol.Lileum.named()], default: [])
   end
 
   @impl true
@@ -66,14 +67,16 @@ defmodule Zkfol.Lileum do
       height = map_size(vars)
       translated = Enum.map(forms, &expand(&1, height, witness))
       constraints = [polynomial | Enum.flat_map(translated, & &1.constraints)]
-      connection = fn {{a, c}, {b, d}} -> {{vars[a], c - 1}, {vars[b], d - 1}} end
+      cell = fn {row, c} -> {vars[row], c - 1} end
+      connection = fn {from, to} -> {cell.(from), cell.(to)} end
 
       structure = %Structure{
         rows: height,
         columns: len,
         arithmetic_constraints: Enum.map(constraints, &expression(&1, vars)),
         copy_constraints: translated |> Enum.flat_map(& &1.copies) |> Enum.map(connection),
-        reads: translated |> Enum.flat_map(& &1.reads) |> Enum.map(connection)
+        reads: translated |> Enum.flat_map(& &1.reads) |> Enum.map(connection),
+        sign_constraints: translated |> Enum.flat_map(& &1.signs) |> Enum.map(cell)
       }
 
       rows = Interpretation.rows(witness) ++ Enum.flat_map(translated, & &1.cells)
@@ -88,7 +91,7 @@ defmodule Zkfol.Lileum do
 
   @spec rows(Ast.arithmetized()) :: [Ast.arithmetized()]
   defp rows(:x), do: [:x, Ast.cell(:next), Ast.cell(:one)]
-  defp rows({:natural, _} = sign), do: [sign | Enum.map(1..4, &Ast.cell({:root, {sign, &1}}))]
+  defp rows({:natural, _} = sign), do: [sign, Ast.cell({:magnitude, sign})]
   defp rows({:cell, _, {:at, :x, _, _}} = read), do: [read]
   defp rows({:cell, _, _} = read), do: [read, Ast.cell({:pointer, read})]
   defp rows(_node), do: []
@@ -106,18 +109,15 @@ defmodule Zkfol.Lileum do
     }
   end
 
-  # temporary expand around natruals with double squares
+  # The magnitude is term when sign is 0 and -term - 1 when sign is 1.
   defp expand({:natural, term} = sign, _height, witness) do
-    [_sign | roots] = rows(sign)
-    magnitude = Ast.sub(Ast.mul(Ast.sub(1, Ast.mul(2, sign)), term), sign)
-    squares = magnitude |> values(witness) |> Enum.map(&FourSquares.decompose/1)
+    [_sign, magnitude] = rows(sign)
+    value = Ast.sub(Ast.mul(Ast.sub(1, Ast.mul(2, sign)), term), sign)
 
     %Translation{
-      cells: [values(sign, witness) | Enum.zip_with(squares, & &1)],
-      constraints: [
-        Ast.mul(sign, Ast.sub(sign, 1)),
-        Ast.sub(magnitude, roots |> Enum.map(&Ast.mul(&1, &1)) |> Enum.reduce(&Ast.add/2))
-      ]
+      cells: [values(sign, witness), values(value, witness)],
+      constraints: [Ast.mul(sign, Ast.sub(sign, 1)), Ast.sub(magnitude, value)],
+      signs: for(c <- 1..Interpretation.len(witness), do: {magnitude, c})
     }
   end
 

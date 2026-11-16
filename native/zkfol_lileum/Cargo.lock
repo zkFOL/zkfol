@@ -179,12 +179,12 @@ dependencies = [
 [[package]]
 name = "lileum-automata"
 version = "0.1.0"
-source = "git+https://github.com/LileumLabs/lileum.git?rev=74a431aabfe9ebfbc17e84e9e3577043101a2e63#74a431aabfe9ebfbc17e84e9e3577043101a2e63"
+source = "git+https://github.com/LileumLabs/lileum.git?rev=f4fba13696276ce696c7100f63644d2a724353a2#f4fba13696276ce696c7100f63644d2a724353a2"
 
 [[package]]
 name = "lileum-reduction"
 version = "0.1.0"
-source = "git+https://github.com/LileumLabs/lileum.git?rev=74a431aabfe9ebfbc17e84e9e3577043101a2e63#74a431aabfe9ebfbc17e84e9e3577043101a2e63"
+source = "git+https://github.com/LileumLabs/lileum.git?rev=f4fba13696276ce696c7100f63644d2a724353a2#f4fba13696276ce696c7100f63644d2a724353a2"
 dependencies = [
  "ark-ff",
  "ark-serialize",
@@ -194,7 +194,7 @@ dependencies = [
 [[package]]
 name = "lileum-sponge"
 version = "0.1.0"
-source = "git+https://github.com/LileumLabs/lileum.git?rev=74a431aabfe9ebfbc17e84e9e3577043101a2e63#74a431aabfe9ebfbc17e84e9e3577043101a2e63"
+source = "git+https://github.com/LileumLabs/lileum.git?rev=f4fba13696276ce696c7100f63644d2a724353a2#f4fba13696276ce696c7100f63644d2a724353a2"
 dependencies = [
  "ark-ff",
  "lileum-automata",
@@ -429,7 +429,7 @@ dependencies = [
 [[package]]
 name = "zkfol"
 version = "0.1.0"
-source = "git+https://github.com/LileumLabs/lileum.git?rev=74a431aabfe9ebfbc17e84e9e3577043101a2e63#74a431aabfe9ebfbc17e84e9e3577043101a2e63"
+source = "git+https://github.com/LileumLabs/lileum.git?rev=f4fba13696276ce696c7100f63644d2a724353a2#f4fba13696276ce696c7100f63644d2a724353a2"
 dependencies = [
  "ark-ff",
  "lileum-reduction",
