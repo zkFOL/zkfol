@@ -17,53 +17,45 @@ defmodule Zkfol.Semantics do
   @doc "I evaluate against supplied cells, including cells derived on demand from expressions."
   @spec eval(Ast.term_t() | Ast.pred(), pos_integer(), pos_integer(), reader()) ::
           integer() | :error
-  def eval(node, len, x, read) do
-    Ast.postwalk(node, fn
-      q when is_integer(q) ->
-        q
+  def eval(q, _len, _x, _read) when is_integer(q), do: q
+  def eval(:x, _len, x, _read), do: x
+  def eval(:len, len, _x, _read), do: len
+  def eval({:cell, _i} = cell, _len, x, read), do: at(cell, read, x)
+  def eval({:cell, _i, _address} = cell, _len, x, read), do: at(cell, read, x)
+  def eval({:reify, phi}, len, x, read), do: eval(phi, len, x, read)
+  def eval({:mul, a, b}, len, x, read), do: product([a, b], len, x, read, 1)
+  def eval({:disj, phis}, len, x, read), do: product(phis, len, x, read, 1)
 
-      :x ->
-        x
+  def eval({:add, a, b}, len, x, read) do
+    with [a, b] <- defined([a, b], len, x, read), do: a + b
+  end
 
-      :len ->
-        len
+  def eval({:eq, a, b}, len, x, read) do
+    with [a, b] <- defined([a, b], len, x, read), do: (a - b) * (a - b)
+  end
 
-      {:cell, _i} = cell ->
-        at(cell, read, x)
+  def eval({:natural, t}, len, x, read) do
+    with [v] <- defined([t], len, x, read), do: if(v >= 0, do: 0, else: 1)
+  end
 
-      {:cell, _i, _address} = cell ->
-        at(cell, read, x)
+  def eval({:conj, phis}, len, x, read) do
+    with vs when is_list(vs) <- defined(phis, len, x, read), do: Enum.sum(vs)
+  end
 
-      {:add, a, b} ->
-        defined([a, b], fn -> a + b end)
+  def eval({:permutes, cells, values}, len, x, read) do
+    with vs when is_list(vs) <- defined(cells, len, x, read),
+         do: if(Enum.sort(vs) == Enum.sort(values), do: 0, else: 1)
+  end
 
-      {:mul, a, b} ->
-        product([a, b])
+  def eval({:distinct, cells}, len, x, read) do
+    with vs when is_list(vs) <- defined(cells, len, x, read),
+         do: if(length(Enum.uniq(vs)) == length(vs), do: 0, else: 1)
+  end
 
-      {:reify, v} ->
-        v
-
-      {:natural, v} ->
-        defined([v], fn -> if v >= 0, do: 0, else: 1 end)
-
-      {:permutes, cells, values} ->
-        defined(cells, fn -> if Enum.sort(cells) == Enum.sort(values), do: 0, else: 1 end)
-
-      {:distinct, cells} ->
-        defined(cells, fn -> if length(Enum.uniq(cells)) == length(cells), do: 0, else: 1 end)
-
-      {:permuted, cells, copy} ->
-        defined(cells ++ copy, fn -> if Enum.sort(cells) == Enum.sort(copy), do: 0, else: 1 end)
-
-      {:eq, a, b} ->
-        defined([a, b], fn -> (a - b) * (a - b) end)
-
-      {:conj, vs} ->
-        defined(vs, fn -> Enum.sum(vs) end)
-
-      {:disj, vs} ->
-        product(vs)
-    end)
+  def eval({:permuted, cells, copy}, len, x, read) do
+    with vs when is_list(vs) <- defined(cells, len, x, read),
+         ws when is_list(ws) <- defined(copy, len, x, read),
+         do: if(Enum.sort(vs) == Enum.sort(ws), do: 0, else: 1)
   end
 
   @doc "I am the column an address names under `itp` at `x`, or `:error` off the matrix."
@@ -87,12 +79,36 @@ defmodule Zkfol.Semantics do
     with {:ok, held} <- Interpretation.fetch(itp, i, x), do: held
   end
 
-  @spec defined([integer() | :error], (-> integer())) :: integer() | :error
-  defp defined(vs, said), do: if(:error in vs, do: :error, else: said.())
+  # The values of `nodes` in order, or :error at the first one undefined.
+  @spec defined([Ast.term_t() | Ast.pred()], pos_integer(), pos_integer(), reader()) ::
+          [integer()] | :error
+  defp defined([], _len, _x, _read), do: []
+
+  defp defined([node | rest], len, x, read) do
+    with v when is_integer(v) <- eval(node, len, x, read),
+         vs when is_list(vs) <- defined(rest, len, x, read),
+         do: [v | vs]
+  end
 
   # A zero factor makes the product zero even beside an undefined cell.
-  @spec product([integer() | :error]) :: integer() | :error
-  defp product(vs), do: if(0 in vs, do: 0, else: defined(vs, fn -> Enum.product(vs) end))
+  @spec product(
+          [Ast.term_t() | Ast.pred()],
+          pos_integer(),
+          pos_integer(),
+          reader(),
+          integer() | :error
+        ) ::
+          integer() | :error
+  defp product([], _len, _x, _read, acc), do: acc
+
+  defp product([node | rest], len, x, read, acc) do
+    case eval(node, len, x, read) do
+      0 -> 0
+      :error -> product(rest, len, x, read, :error)
+      _v when acc == :error -> product(rest, len, x, read, :error)
+      v -> product(rest, len, x, read, acc * v)
+    end
+  end
 
   @doc "I am the judgement: `itp` satisfies `phi` exactly when `phi` is 0 at every column."
   @spec valid?(Ast.pred(), Interpretation.t()) :: boolean()
