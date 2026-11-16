@@ -246,7 +246,8 @@ defmodule Zkfol.Lang do
   defp scoped(rel = %Rel{clauses: clauses}, scope) do
     clauses =
       for {head, body} <- clauses do
-        bound = MapSet.new(Term.names(head))
+        equations = for {:eq, _, _} = goal <- body, do: goal
+        bound = MapSet.new(Term.names(head ++ equations))
         {head, for(goal <- body, do: scoped(goal, bound, scope))}
       end
 
@@ -257,7 +258,11 @@ defmodule Zkfol.Lang do
   defp scoped({:call, {_mod, q}, args}, bound, scope), do: scoped({:call, q, args}, bound, scope)
 
   defp scoped({:call, q, args}, bound, scope) do
-    callee = if is_atom(q) and MapSet.member?(bound, q), do: {:var, q}, else: q
+    callee =
+      if is_atom(q) and MapSet.member?(bound, q),
+        do: {:var, q},
+        else: q
+
     {:call, callee, for(arg <- args, do: scoped(arg, bound, scope))}
   end
 
