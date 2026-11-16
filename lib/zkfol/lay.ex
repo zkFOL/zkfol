@@ -447,11 +447,9 @@ defmodule Zkfol.Lay do
   # The allocation determines placement: scalar, term identity, bank, or no storage.
   @spec spread({Slot.t(), term()}, pos_integer(), Alloc.t()) ::
           [{{pos_integer(), pos_integer()}, term()}]
-  # A closure is {method, object, fixed arguments...}; the fixed arguments go to the rows.
-  defp spread({%Slot{allocation: {:rel, _name, rows}}, closure}, x, alloc) do
-    fixed = closure |> Tuple.to_list() |> Enum.drop(2)
-    for {value, row} <- Enum.zip(fixed, rows), do: {{Alloc.row(alloc, row), x}, value}
-  end
+  # A closure is AL's compound of the method and its fixed arguments; those go to the rows.
+  defp spread({%Slot{allocation: {:rel, _name, rows}}, %AL.Goal.Compound{args: fixed}}, x, alloc),
+    do: for({value, row} <- Enum.zip(fixed, rows), do: {{Alloc.row(alloc, row), x}, value})
 
   defp spread({%Slot{allocation: {:cell, ref}}, value}, x, alloc),
     do: [{{Alloc.row(alloc, ref), x}, value}]
