@@ -210,11 +210,11 @@ defmodule Examples.EForgery do
 
     for stand <- lay.stands,
         {_relation, tuple} = stand.fact,
-        {value, slot = %Slot{allocation: {:bank, bank, _extent}}} <-
+        {value, slot = %Slot{allocation: {:bank, bank, extent}}} <-
           Enum.zip(tuple, Alloc.member(alloc, stand.member).slots),
         is_list(value),
         {cell, p} <- Enum.with_index(value),
-        column = Ast.column(Lay.at(slot, p), stand.column),
+        column = extent + 1 - p,
         {held, ref} <- Enum.zip(List.flatten([cell]), Alloc.slot_rows(alloc, slot)),
         do: {held, bank, Alloc.row(alloc, ref), column}
   end

@@ -119,10 +119,6 @@ defmodule Zkfol.Ast do
   def mul(q, t) when is_integer(q), do: {:mul, t, q}
   def mul(t, u), do: {:mul, t, u}
 
-  @doc "I am reify(phi): the truth value of `phi` as a term."
-  @spec reify(pred()) :: term_t()
-  def reify(phi), do: {:reify, phi}
-
   @doc "I am t = u, born canonical: a constant rides right, as in a sum."
   @spec eq(t, t) :: pred(t) when t: var
   def eq(q, u) when is_integer(q) and not is_integer(u), do: {:eq, u, q}

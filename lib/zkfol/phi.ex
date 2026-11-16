@@ -19,7 +19,6 @@ defmodule Zkfol.Phi do
   - `run/2`, `verb/0`: the pipeline pass.
   - `relaid/2`: compile a derived statement and construct its witness.
   - `compile/3`: return the predicate and allocation.
-  - `lower/2`: return the predicate with allocated row numbers.
   """
 
   @behaviour Zkfol.Pipeline
@@ -80,12 +79,6 @@ defmodule Zkfol.Phi do
 
       {:ok, %{statement | stage: stage}}
     end
-  end
-
-  @doc "I am the predicate of `root` against `rels`, linked."
-  @spec lower(Rel.t(), [Rel.t()]) :: {:ok, Ast.pred()} | {:error, Refusal.t()}
-  def lower(root = %Rel{}, rels) do
-    with {:ok, pred, alloc} <- compile(root, rels), do: {:ok, Alloc.link(pred, alloc)}
   end
 
   @doc "I compile `root`; argument values stay private, only their kind is read."

@@ -51,11 +51,6 @@ defmodule Zkfol.Derivation do
   def consumed(%__MODULE__{consumed: consumed}, fact),
     do: consumed |> List.keyfind(fact, 0, {fact, []}) |> elem(1)
 
-  @doc "I am the 0-based seq of the clause that established one fact."
-  @spec clause(t(), fact()) :: non_neg_integer() | nil
-  def clause(%__MODULE__{clauses: clauses}, fact),
-    do: clauses |> List.keyfind(fact, 0, {fact, nil}) |> elem(1)
-
   @doc "I am what a run established of one relation: its last fact, the query's own."
   @spec root(t(), atom()) :: fact() | nil
   def root(%__MODULE__{facts: facts}, relation),

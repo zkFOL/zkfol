@@ -54,18 +54,6 @@ defmodule Zkfol.Lang.Term do
     |> Enum.reverse()
   end
 
-  @doc "I am the elements a closed bracket lists; a bracket open past a name lists none for sure."
-  @spec closed(term()) :: [term()] | nil
-  def closed(nil), do: []
-  def closed({:var, _name}), do: nil
-
-  def closed({:cons, head, tail}) do
-    case closed(tail) do
-      nil -> nil
-      rest -> [head | rest]
-    end
-  end
-
   @doc "I say whether a term is a sequence: a bracket or the empty one."
   @spec sequence?(term()) :: boolean()
   def sequence?(nil), do: true

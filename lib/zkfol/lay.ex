@@ -10,7 +10,6 @@ defmodule Zkfol.Lay do
   - `arrows/1`: one arrow per consumption between laid columns.
   - `addresses/1`: each address row beside the member holding it.
   - `regions/1`: the alloc's banks by name and absolute rows.
-  - `at/2`: where a slot’s cell stands.
   """
 
   use TypedStruct
@@ -193,14 +192,6 @@ defmodule Zkfol.Lay do
   defp kind(%Bank{}), do: :bank
   defp kind(%Zkfol.Nodes{}), do: :bank
   defp kind(%Alloc.Member{}), do: :member
-
-  @doc """
-  I am the fixed address of the `index`-th element in a bank's declared extent.
-  """
-  @spec at(Slot.t(), non_neg_integer()) :: Ast.address()
-  def at(%Slot{allocation: {:bank, _name, extent}}, index) do
-    Ast.address(:x, 0, extent + 1 - index)
-  end
 
   ############################################################
   #                   Private Implementation                 #

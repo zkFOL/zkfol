@@ -83,9 +83,6 @@ defmodule Zkfol.Refusal do
   defp said({:unbound_variable, %{goals: goals}}),
     do: {:restructure, "the goals #{inspect(goals)} name a variable no clause binds"}
 
-  defp said({:unbound_variable, %{equation: {a, b}}}),
-    do: {:restructure, "the equation #{inspect(a)} = #{inspect(b)} binds no variable"}
-
   defp said({:relation_not_in_scope, %{relation: name}}),
     do: {:restructure, "the relation #{name} is not in scope"}
 
@@ -97,12 +94,6 @@ defmodule Zkfol.Refusal do
 
   defp said({:unliftable_term, %{term: term}}),
     do: {:restructure, "no clause lowers the term #{inspect(term)}"}
-
-  defp said({:unliftable_count, %{}}),
-    do: {:restructure, "the call's count lifts to no frame, and no pointer stands for it"}
-
-  defp said({:symbol_not_allocated, %{symbol: sym}}),
-    do: {:restructure, "the bank #{sym} stands on no member"}
 
   defp said({:head_not_a_column, %{head: head}}),
     do:
