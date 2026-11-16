@@ -21,9 +21,9 @@ defmodule Zkfol.Refusal do
   @doc "I hold that no element of `enum` satisfies `bad?`; `refusal` names the first that does."
   @spec refute(Enumerable.t(), (term() -> boolean()), (term() -> t())) :: :ok | {:error, t()}
   def refute(enum, bad?, refusal) do
-    case Enum.find(enum, bad?) do
+    case Enum.find_value(enum, fn value -> if bad?.(value), do: {:found, value} end) do
       nil -> :ok
-      offender -> {:error, refusal.(offender)}
+      {:found, offender} -> {:error, refusal.(offender)}
     end
   end
 
