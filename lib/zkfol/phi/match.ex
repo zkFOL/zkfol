@@ -73,10 +73,10 @@ defmodule Zkfol.Phi.Match do
   def cells([]), do: []
   def cells(value), do: scalar(value)
 
-  @doc "I am a member's value as seen from a call through `pointer`."
+  @doc "I am a member's value as seen from a call at `address`."
   @spec frame(value(), Ast.address()) :: value()
-  def frame({:node, id}, pointer), do: {:node, frame(id, pointer)}
-  def frame({:cell, ref}, {:at, {:cell, row}, 1, 0}), do: Ast.cell(ref, row)
+  def frame({:node, id}, address), do: {:node, frame(id, address)}
+  def frame({:cell, ref}, {:at, base, mul, add}), do: Ast.at(ref, base, mul, add)
 
   @doc "I constrain `a` and `b` to be equal: the side whose names are all bound is the value."
   @spec equal(Term.t(), Term.t(), Walk.t()) :: result()

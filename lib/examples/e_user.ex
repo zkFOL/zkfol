@@ -242,7 +242,7 @@ defmodule Examples.EUser do
   example registers(n \\ 8) do
     {:ok, statement, _trace} = Pipeline.run(plain(), %Statement{rels: [regs()], args: [n]})
 
-    assert Interpretation.at(Statement.witness(statement), 3, 1) == fib(n)
+    assert Interpretation.at(Statement.witness(statement), 3, n) == fib(n)
     statement
   end
 
@@ -251,7 +251,7 @@ defmodule Examples.EUser do
     source = %Statement{rels: [regsm()], args: [n, :_, :_, :_]}
     {:ok, statement, _trace} = Pipeline.run(plain(), source)
 
-    assert Interpretation.at(Statement.witness(statement), 2, 1) == rem(fib(n + 1), 7919)
+    assert Interpretation.at(Statement.witness(statement), 2, n) == rem(fib(n + 1), 7919)
     statement
   end
 
@@ -293,7 +293,7 @@ defmodule Examples.EUser do
     source = %Statement{rels: [power_rel(2)], args: [exponent + 1]}
     {:ok, statement, _trace} = Pipeline.run(plain(), source)
 
-    assert Interpretation.at(Statement.witness(statement), 4, 1) == 2 ** exponent
+    assert Interpretation.at(Statement.witness(statement), 4, exponent + 1) == 2 ** exponent
     statement
   end
 
@@ -420,7 +420,7 @@ defmodule Examples.EUser do
     assert Enum.take(Zkfol.stream(from_zero(), [n, :_]), 1) == [[n, n + 1]]
 
     assert Statement.bank(statement, :from_zero) |> Enum.take(2) ==
-             [Enum.to_list(n..0//-1), Enum.to_list((n + 1)..1//-1)]
+             [Enum.to_list(0..n), Enum.to_list(1..(n + 1))]
 
     statement
   end

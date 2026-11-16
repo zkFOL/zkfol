@@ -17,7 +17,7 @@ defmodule Zkfol.Unfold do
 
   alias Zkfol.Ast
   alias Zkfol.Lang.{Rel, Term}
-  alias Zkfol.Unfold.{Array, Bindings, Inline, Lookup, Solve, Traversal}
+  alias Zkfol.Unfold.{Array, Bindings, Inline, Lookup, Recursion, Solve, Traversal}
 
   @typedoc "A call in a body: the relation and its position among the body's calls to it."
   @type step :: {atom() | nil, non_neg_integer()}
@@ -115,8 +115,11 @@ defmodule Zkfol.Unfold do
 
   @doc "I am the members `root` needs, root first, each with its unfolded clauses."
   @spec program(Rel.t(), %{atom() => Rel.t()}) :: program()
-  def program(root = %Rel{}, scope),
-    do: members([{root.name, List.duplicate(nil, root.arity)}], [], scope)
+  def program(root = %Rel{}, scope) do
+    [{root.name, List.duplicate(nil, root.arity)}]
+    |> members([], scope)
+    |> Recursion.linear()
+  end
 
   @spec members([key()], program(), %{atom() => Rel.t()}) :: program()
   defp members([], done, _scope), do: Enum.reverse(done)

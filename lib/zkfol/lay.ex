@@ -79,7 +79,9 @@ defmodule Zkfol.Lay do
             end)
         }
 
-        descend(:queue.from_list([{fact, root.name, {:free, 1}}]), lay, index, %{}, MapSet.new())
+        column = 1 + depth(fact, root, index)
+        start = {fact, root.name, {:free, column}}
+        descend(:queue.from_list([start]), lay, index, %{}, MapSet.new())
     end
   end
 
@@ -342,6 +344,21 @@ defmodule Zkfol.Lay do
           )
         end
     end
+  end
+
+  # The number of calls that read the previous column, counted down from `fact`.
+  @spec depth(Derivation.fact(), Member.t(), map()) :: non_neg_integer()
+  defp depth(fact, member, index) do
+    sites = Map.get(member.sites, Map.get(index.clauses, fact), [])
+
+    Enum.find_value(sites, 0, fn
+      %Site{address: {:at, :x, 1, -1}, source: source} ->
+        [callee] = consumed(source, fact, index.consumed)
+        1 + depth(callee, member, index)
+
+      _site ->
+        nil
+    end)
   end
 
   @spec source_value(Alloc.binding(), Derivation.fact(), map()) :: term()
