@@ -2,7 +2,7 @@ defmodule Examples.EPhi do
   @moduledoc "I am the lowering's evidence: inlined calls keep their locals, aliases and goal order."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -27,7 +27,7 @@ defmodule Examples.EPhi do
   end
 
   defrel local_calls(x, y) do
-    each([x, y], local_factor)
+    each([x, y], local_factor())
   end
 
   defrel repeated_calls(x, y) do
@@ -79,9 +79,9 @@ defmodule Examples.EPhi do
   end
 
   defrel wrapped_calls(n, direct, first, second) do
-    held(n, direct)
-    delegated(n + 1, first)
-    delegated(n + 1, second)
+    EAlloc.held(n, direct)
+    EAlloc.delegated(n + 1, first)
+    EAlloc.delegated(n + 1, second)
   end
 
   @doc "The wrapper leaves no member; both of its calls lay from the one fact they consume."

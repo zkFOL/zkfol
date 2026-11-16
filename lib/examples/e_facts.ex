@@ -2,7 +2,7 @@ defmodule Examples.EFacts do
   @moduledoc "I am the facts' evidence: the descriptor read off the clauses, or the refusal."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
   import ExUnit.Assertions
 
   alias Examples.EUser

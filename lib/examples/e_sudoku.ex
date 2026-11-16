@@ -2,7 +2,7 @@ defmodule Examples.ESudoku do
   @moduledoc "I am the sudoku's evidence: the game as a program over its grid."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -93,23 +93,23 @@ defmodule Examples.ESudoku do
     each(cols, permutation(n))
     boxes(blocks, xs, bs)
     each(bs, permutation(n))
-    each(xs, all_labeled)
+    each(xs, all_labeled())
   end
 
   defrel boxes(n, rows, bs) do
     map(rows, chunk(n), runs)
     chunk(n, runs, bands)
-    map(bands, column, stacks)
-    map(stacks, mapcon, grouped)
+    map(bands, column(), stacks)
+    map(stacks, mapcon(), grouped)
     concat(grouped, bs)
   end
 
   defrel mapcon(xs, ys) do
-    map(xs, concat, ys)
+    map(xs, concat(), ys)
   end
 
   defrel all_labeled(xs) do
-    each(xs, label)
+    each(xs, label())
   end
 
   @doc "I solve the clues with a free puzzle and return the answer as a statement."
@@ -223,7 +223,7 @@ defmodule Examples.ESudoku do
     {n, blocks, grid} = {4, 2, @solution4}
 
     root =
-      rel :grid do
+      rel do
         grid(xs) do
           array([^n, ^n], xs)
           sudoku(xs, ^blocks)

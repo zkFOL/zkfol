@@ -534,8 +534,8 @@ defmodule Zkfol.Face do
     do: call_text(name, head) <> " do " <> Enum.map_join(body, "; ", &goal_text/1) <> " end"
 
   @spec call_text(Zkfol.Lang.Term.name(), [term()]) :: String.t()
-  defp call_text({mod, name}, args), do: call_text(:"#{inspect(mod)}.#{name}", args)
-  defp call_text(name, args), do: "#{name}(#{Enum.map_join(args, ", ", &surface_text/1)})"
+  defp call_text(name, args),
+    do: "#{Zkfol.Lang.Rel.name(name)}(#{Enum.map_join(args, ", ", &surface_text/1)})"
 
   @spec goal_text(term()) :: String.t()
   defp goal_text({:call, {:var, name}, args}), do: call_text(name, args)

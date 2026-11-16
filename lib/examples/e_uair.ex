@@ -2,7 +2,7 @@ defmodule Examples.EUair do
   @moduledoc "I am the prover boundary's evidence: what it refuses, and the shapes it emits."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 

@@ -2,7 +2,7 @@ defmodule Examples.EPassed do
   @moduledoc "I am the passed reading's evidence: a prim reads the same through a handed name."
 
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
 
   import ExUnit.Assertions
 
@@ -22,7 +22,7 @@ defmodule Examples.EPassed do
   @spec equation_local_name() :: Derivation.t()
   example equation_local_name do
     root =
-      rel :local_number do
+      rel do
         local_number(x) do
           add = 3
           x = add + 1
@@ -67,7 +67,7 @@ defmodule Examples.EPassed do
   defrel invoke(f, x, y), do: f(x, y)
 
   defrel captured_callback(k, x, y) do
-    f(x, y)
+    f.(x, y)
     f = invoke(add(k * k + 1))
   end
 
@@ -92,7 +92,7 @@ defmodule Examples.EPassed do
   end
 
   defrel counted(xs) do
-    each(xs, natural)
+    each(xs, natural())
   end
 
   @spec passed_reading() :: Statement.t()
@@ -303,7 +303,7 @@ defmodule Examples.EPassed do
   end
 
   defrel combined(xs, sum) do
-    with_total(xs, total, sum)
+    with_total(xs, total(), sum)
   end
 
   defrel with_total(xs, f, sum) do

@@ -48,7 +48,7 @@ defmodule Zkfol.Phi do
   alias Zkfol.Ast
   alias Zkfol.Derivation
   alias Zkfol.Lay
-  alias Zkfol.Lang
+  alias Zkfol.Program
   alias Zkfol.Lang.Rel
   alias Zkfol.Phi.Value
   alias Zkfol.Phi.Expression
@@ -141,7 +141,7 @@ defmodule Zkfol.Phi do
   @spec lowered(Rel.t(), [Rel.t()] | nil, [term()]) ::
           {:ok, Ast.pred(), Alloc.t(), Walk.t()} | {:error, Refusal.t()}
   defp lowered(root, rels, args) do
-    with {:ok, [root | _rest] = reached} <- Lang.reached(root, rels || [root]) do
+    with {:ok, [root | _rest] = reached} <- Program.reached(root, rels || [root]) do
       compiled(root, Map.new(reached, &{&1.name, &1}), args)
     end
   end
@@ -287,7 +287,9 @@ defmodule Zkfol.Phi do
     declarations =
       for {{ref, form}, k} <- Enum.with_index(Enum.zip(refs, handed)) do
         list? =
-          Enum.any?(rel.clauses, fn {head, _body} -> Lang.Term.sequence?(Enum.at(head, k)) end)
+          Enum.any?(rel.clauses, fn {head, _body} ->
+            Zkfol.Lang.Term.sequence?(Enum.at(head, k))
+          end)
 
         # Supplied numbers choose owned cells here; matching never sees their values.
         input = Enum.at(inputs, k)
@@ -632,8 +634,8 @@ defmodule Zkfol.Phi do
 
   defp probe_goal?({:eq, _, _}, _scope), do: true
 
-  defp probe_goal?({:call, name, _args}, scope) when is_atom(name),
-    do: scope[name].al != nil
+  defp probe_goal?({:call, name, _args}, scope) when is_atom(name) or is_function(name, 0),
+    do: scope[Rel.name(name)].al != nil
 
   defp probe_goal?(_goal, _scope), do: false
 
@@ -903,7 +905,7 @@ defmodule Zkfol.Phi do
   defp unify({:var, v}, value, walk = %Walk{env: env}) do
     value = Expression.substitute(value, walk)
 
-    if v in Lang.Term.names(value),
+    if v in Zkfol.Lang.Term.names(value),
       do: throw({:refused, {:unbound_variable, %{variable: v}}})
 
     %{walk | env: Map.put(env, v, value)}

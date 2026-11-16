@@ -1,7 +1,7 @@
 defmodule Examples.ENodes do
   @moduledoc "I exercise constructed terms across calls, their sharing, and their proof obligations."
   use ExExample
-  use Zkfol.Lang
+  use Zkfol
   import ExUnit.Assertions
 
   alias Examples.EAst
@@ -124,7 +124,7 @@ defmodule Examples.ENodes do
     n = length(xs)
 
     relation =
-      rel :reversed do
+      rel do
         reversed(xs, ys) do
           array([^n], xs)
           rev(xs, ys)

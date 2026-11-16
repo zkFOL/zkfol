@@ -2,6 +2,8 @@ defmodule Zkfol do
   @moduledoc """
   I am the language's front door: one call takes a statement through a route to a proof,
   journalled, and returns the receipt.
+
+  `use Zkfol` imports the relation macros and the FOL and primitive standard libraries.
   """
 
   alias Zkfol.Lang
@@ -15,6 +17,16 @@ defmodule Zkfol do
 
   @typedoc "What a door takes: a statement, a root relation, or the relations in scope."
   @type target :: Statement.t() | Lang.Rel.t() | [Lang.Rel.t()]
+
+  @doc "I bring the relational syntax and standard library into the caller's module."
+  @spec __using__(keyword()) :: Macro.t()
+  defmacro __using__(_opts) do
+    quote do
+      use Zkfol.Lang
+      import Zkfol.FOL
+      import Zkfol.Prims
+    end
+  end
 
   @doc "I am the whole act: define, run, verdicts, prove, receipt."
   @spec compile(target(), keyword()) :: Log.Run.t()

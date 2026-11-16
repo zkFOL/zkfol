@@ -21,7 +21,7 @@ defmodule Zkfol.FOL do
 
   @phi {Zkfol.Array, :array}
   defrel array(dimensions, x) do
-    each(dimensions, natural)
+    each(dimensions, Zkfol.Prims.natural())
     array_cells(dimensions, x)
   end
 
