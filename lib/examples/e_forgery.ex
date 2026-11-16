@@ -9,6 +9,7 @@ defmodule Examples.EForgery do
   import ExUnit.Assertions
 
   alias Examples.EAl
+  alias Examples.EArrays
   alias Examples.EAst
   alias Examples.EDoubling
   alias Examples.EFacts
@@ -80,7 +81,8 @@ defmodule Examples.EForgery do
       mutual_last: EPassed.mutual_last(),
       loose_last: EPassed.loosely_stepped(),
       last_at: EPassed.agreeing_bases(),
-      optional_tail: ENodes.scalar_tail()
+      optional_tail: ENodes.scalar_tail(),
+      walked: EArrays.walks_reach_the_last_element()
     ]
   end
 

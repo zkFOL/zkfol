@@ -163,11 +163,13 @@ defmodule Zkfol.Phi do
 
     {name, _binds, walk} = compile_member(root, List.duplicate(:fresh, root.arity), ctx, args)
 
-    pred =
-      Ast.conj(
-        walk.predicates ++
-          for(bank = %Bank{} <- walk.members, do: runs(bank))
-      )
+    runs =
+      for %Member{slots: slots} <- walk.members,
+          %Slot{allocation: {:bank, bank, extent}} <- slots,
+          uniq: true,
+          do: runs(bank, extent)
+
+    pred = Ast.conj(walk.predicates ++ runs)
 
     {pred, members} = Zkfol.Nodes.lower(pred, walk.members)
     {:ok, pred, Alloc.numbered(members, name), walk}
@@ -175,15 +177,21 @@ defmodule Zkfol.Phi do
     {:refused, refusal} -> {:error, refusal}
   end
 
-  # A bank's presence is one on a single run starting at column two, so a forger cannot
-  # shorten a walk by dropping presence in the middle.
-  @spec runs(Bank.t()) :: Ast.pred()
-  defp runs(%Bank{name: name}) do
-    Ast.disj([
-      Ast.eq({:cell, {:in, name}}, 0),
-      Ast.eq(Ast.at({:in, name}, :x, 1, -1), 1),
-      Ast.eq(:x, 2)
-    ])
+  # A bank's presence is one on the run from column two to its last element: the run
+  # starts at column two, has no gap and reaches the last element, so a forger cannot
+  # shorten a walk.
+  @spec runs(atom(), non_neg_integer()) :: Ast.pred()
+  defp runs(name, extent) do
+    unbroken =
+      Ast.disj([
+        Ast.eq({:cell, {:in, name}}, 0),
+        Ast.eq(Ast.at({:in, name}, :x, 1, -1), 1),
+        Ast.eq(:x, 2)
+      ])
+
+    if extent == 0,
+      do: unbroken,
+      else: Ast.conj([unbroken, Ast.eq(Ast.at({:in, name}, :x, 0, extent + 1), 1)])
   end
 
   ############################################################
