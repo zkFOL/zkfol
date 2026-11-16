@@ -6,6 +6,7 @@ defmodule Examples.EZincPlus do
   import ExUnit.Assertions
 
   alias Examples.EUser
+  alias Zkfol.Interpretation
   alias Zkfol.Log
   alias Zkfol.Prover
   alias Zkfol.Statement
@@ -26,11 +27,14 @@ defmodule Examples.EZincPlus do
     assert {_said, 0} = verify.(prefix <> ".json")
 
     edited = prefix <> ".22.json"
+    statement = Log.Run.final_stage(ran)
+    [{_name, _row, column} | _] = Statement.claims(statement)
+    index = Interpretation.len(Statement.witness(statement)) - column
 
     (prefix <> ".json")
     |> File.read!()
     |> JSON.decode!()
-    |> update_in(["public", "I64", Access.at(0), Access.at(0)], fn 21 -> 22 end)
+    |> update_in(["public", "I64", Access.at(0), Access.at(index)], fn 21 -> 22 end)
     |> then(&File.write!(edited, JSON.encode!(&1)))
 
     assert {_said, 1} = verify.(edited)

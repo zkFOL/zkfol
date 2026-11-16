@@ -53,7 +53,7 @@ defmodule Examples.ERefusal do
       {:unbound_variable, %{goals: [{:call, :nth, [1, {:var, :xs}, {:var, :v}]}]}},
       {:unbound_variable, %{equation: {{:var, :a}, 1}}},
       {:unliftable_count, %{}},
-      {:unroll_budget, %{relation: :f}},
+      {:array_shape, %{dimensions: [-1]}},
       {:unliftable_term, %{term: {:papply, :f, []}}},
       {:unresolved_within_budget, %{reductions: 100_000}},
       {:value_exceeds_cell, %{value: Integer.pow(2, 7040)}},

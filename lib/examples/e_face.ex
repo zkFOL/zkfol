@@ -13,7 +13,7 @@ defmodule Examples.EFace do
   alias Zkfol.Statement
   alias Zkfol.ZincPlus
 
-  @doc "The slack row a guard range-checks reads :ranged; the rest are plain or shifted."
+  @doc "A recursive call shows its pointer columns beside the scalar values and guard slack."
   @spec the_grid_feed_is_settled() :: %{atom() => term()}
   example the_grid_feed_is_settled do
     statement = EUser.fibonacci()
@@ -28,8 +28,10 @@ defmodule Examples.EFace do
     feed = Face.grid(uair)
 
     assert feed.len == 8
-    assert hd(feed.columns) == Enum.reverse(Enum.map(1..8, &EUser.fib/1)) ++ List.duplicate(1, 8)
-    assert feed.kinds == [:scheduled, :scheduled, :ranged] ++ List.duplicate(:scheduled, 6)
+    assert hd(hd(feed.columns)) == 1
+    assert Enum.at(hd(feed.columns), feed.len - 1) == 8
+    assert Enum.count(feed.kinds, &(&1 == :pointer)) == 2
+    assert :ranged in feed.kinds
     assert Enum.all?(feed.columns, &(length(&1) == 16))
     assert feed.num_vars == 4
 

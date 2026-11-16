@@ -4,6 +4,7 @@ defmodule Zkfol.FOL do
 
   ### Public API
 
+  - `array/0`: `array(dimensions, value)`, a rectangular array of scalar cells.
   - `each/0`: `each(xs, r)`, `r` holding of every cell.
   - `map/0`: `map(xs, r, ys)`, `ys` the image of `xs` under `r`.
   - `length/0`: `length(xs, n)`.
@@ -17,6 +18,21 @@ defmodule Zkfol.FOL do
   """
 
   use Zkfol.Lang
+
+  @phi {Zkfol.Array, :array}
+  defrel array(dimensions, x) do
+    each(dimensions, natural)
+    array_cells(dimensions, x)
+  end
+
+  defrel array_cells([], x) do
+    x = x + 0
+  end
+
+  defrel array_cells([n | dimensions], xs) do
+    length(xs, n)
+    each(xs, array_cells(dimensions))
+  end
 
   defrel each([], _r)
 
@@ -60,14 +76,15 @@ defmodule Zkfol.FOL do
 
   defrel chunk(_n, [], [])
 
-  defrel chunk(n, xs, [c | cs]) do
-    split(n, xs, c, rest)
+  defrel chunk(n, [h | t], [c | cs]) do
+    split(n, [h | t], c, rest)
     chunk(n, rest, cs)
   end
 
   defrel split(0, xs, [], xs)
 
   defrel split(n, [h | t], [h | p], rest) do
+    n > 0
     split(n - 1, t, p, rest)
   end
 
@@ -79,8 +96,8 @@ defmodule Zkfol.FOL do
 
   defrel column([[] | _], [])
 
-  defrel column(rows, [c | cs]) do
-    heads(rows, c, rest)
+  defrel column([[h | t] | rows], [c | cs]) do
+    heads([[h | t] | rows], c, rest)
     column(rest, cs)
   end
 end

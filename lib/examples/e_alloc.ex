@@ -10,6 +10,7 @@ defmodule Examples.EAlloc do
   alias Zkfol.Alloc
   alias Zkfol.Interpretation
   alias Zkfol.Lay
+  alias Zkfol.Lang.Rel
   alias Zkfol.Phi
   alias Zkfol.Prover
 
@@ -118,6 +119,67 @@ defmodule Examples.EAlloc do
     end
   end
 
+  defrel discarded(0, _value, 0)
+
+  defrel discarded(1, value, result) do
+    result = 0 * value
+  end
+
+  defrel discard_via_call(tag, value, result) do
+    discarded(tag, value, result)
+  end
+
+  @doc "Unused and erased callee arguments need no equality; supplied root values remain public."
+  @spec unused_call_parameters() :: [Prover.Report.t()]
+  example unused_call_parameters do
+    root = discard_via_call()
+    {:ok, pred, alloc} = Phi.compile(root, nil, [0, 7, 0])
+
+    for args <- [[0, 7, 0], [1, 99, 0]] do
+      assert Phi.compile(root, nil, args) == {:ok, pred, alloc}
+      {:ok, derivation} = Al.derived(root, args)
+      lay = Lay.of(derivation, alloc)
+      {:ok, claims} = Lay.claims(lay, [1, 2, 3])
+
+      assert {:ok, report, _id} =
+               Prover.prove(Alloc.link(pred, alloc), Lay.witness(lay), claims: claims)
+
+      report
+    end
+  end
+
+  defrel sometimes_read(0, x, z) do
+    z = 0 * x
+  end
+
+  defrel sometimes_read(1, x, z) do
+    z = x + 1
+  end
+
+  @doc "An erased read in one alternative cannot hide a cell read by another."
+  @spec alternatives_share_live_storage() :: [Prover.Report.t()]
+  example alternatives_share_live_storage do
+    root = sometimes_read()
+
+    for clauses <- [root.clauses, Enum.reverse(root.clauses)],
+        args <- [[0, 3, 0], [1, 3, 4]] do
+      root = %{root | clauses: clauses}
+      {:ok, pred, alloc} = Phi.compile(root)
+      assert Alloc.width(alloc) == 4
+      {:ok, derivation} = Al.derived(root, args)
+      lay = Lay.of(derivation, alloc)
+      pred = Alloc.link(pred, alloc)
+      witness = Lay.witness(lay)
+      {:ok, claims} = Lay.claims(lay, [1, 2, 3])
+      assert {:ok, report, _id} = Prover.prove(pred, witness, claims: claims)
+      [_, _, result] = Alloc.root(alloc).slots
+      [ref] = Alloc.slot_rows(alloc, result)
+      forged = Interpretation.put(witness, Alloc.row(alloc, ref), 1, List.last(args) + 1)
+      refute Zkfol.Semantics.valid?(pred, forged)
+      report
+    end
+  end
+
   @doc "An impossible clause owns no callee or value rows, wherever the contradiction occurs."
   @spec impossible_clauses_allocate_nothing() :: [Alloc.t()]
   example impossible_clauses_allocate_nothing do
@@ -128,6 +190,30 @@ defmodule Examples.EAlloc do
       assert Zkfol.Semantics.valid?(linked, Interpretation.new([[0]]))
       refute Zkfol.Semantics.valid?(linked, Interpretation.new([[1]]))
       alloc
+    end
+  end
+
+  @doc "Facts exclude an impossible alternative even after an ordinary call."
+  @spec clause_facts_ignore_call_order() :: [Prover.Report.t()]
+  example clause_facts_ignore_call_order do
+    x = {:var, :x}
+    y = {:var, :y}
+    helper = %Rel{name: :helper, arity: 0, clauses: [{[], []}]}
+    root = %Rel{name: :entry, arity: 2, clauses: [{[x, y], [{:call, :choice, [x, y]}]}]}
+
+    for body <- [[{:eq, 1, 2}, {:call, :helper, []}], [{:call, :helper, []}, {:eq, 1, 2}]] do
+      choice = %Rel{name: :choice, arity: 2, clauses: [{[x, x], []}, {[x, y], body}]}
+      rels = [root, choice, helper]
+      {:ok, pred, alloc} = Phi.compile(root, rels)
+      assert Alloc.width(alloc) == 3
+      {:ok, derivation} = Al.derived(rels, [7, 7])
+      lay = Lay.of(derivation, alloc)
+      {:ok, claims} = Lay.claims(lay, [1, 2])
+
+      assert {:ok, report, _id} =
+               Prover.prove(Alloc.link(pred, alloc), Lay.witness(lay), claims: claims)
+
+      report
     end
   end
 end

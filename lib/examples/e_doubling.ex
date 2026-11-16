@@ -91,8 +91,8 @@ defmodule Examples.EDoubling do
       Pipeline.run(Pipeline.default(), Statement.of(EUser.fib(), args: [:_, 21]))
 
     witness = Statement.witness(statement)
-    assert Interpretation.len(witness) == 8
-    assert Interpretation.at(witness, 1, 8) == 21
+    assert Zkfol.Derivation.root(Statement.derivation(statement), :fib) == {:fib, [8, 21]}
+    assert Semantics.valid?(Statement.pred(statement), witness)
     statement
   end
 

@@ -103,7 +103,7 @@ defmodule Examples.EPassed do
     odd_last(n - 2, tail, out)
   end
 
-  @doc "A fractional stride has no bank length, so the list stays terms."
+  @doc "A nonunit scalar step works with an undeclared list in term storage."
   @spec strided_last() :: Statement.t()
   example strided_last do
     {:ok, statement, _trace} =
@@ -128,7 +128,7 @@ defmodule Examples.EPassed do
     last_call(n, xs, out)
   end
 
-  @doc "A callee whose extent is unknown leaves the caller's list as terms."
+  @doc "Mutually recursive calls share an undeclared list through term storage."
   @spec mutual_last() :: Statement.t()
   example mutual_last do
     rels = [last_call(), last_step()]
@@ -154,7 +154,7 @@ defmodule Examples.EPassed do
     loose_last(n - 2, tail, out)
   end
 
-  @doc "Two bases and two strides that disagree on the length leave the list as terms."
+  @doc "Alternative bases and strides work without inferring the list length."
   @spec loosely_stepped() :: Statement.t()
   example loosely_stepped do
     {:ok, statement, _trace} =
@@ -172,7 +172,7 @@ defmodule Examples.EPassed do
     last_at(n - 2, tail, out)
   end
 
-  @doc "Different bases and strides that agree on length(xs) = n - 4 give one extent."
+  @doc "Different bases and strides constrain the same list through ordinary calls."
   @spec agreeing_bases() :: Statement.t()
   example agreeing_bases do
     {:ok, statement, _trace} =

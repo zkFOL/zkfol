@@ -105,14 +105,20 @@ defmodule Examples.EForgery do
   @doc "I am the placing checked: every cell of every sequence read back where its reader looks."
   @spec placings() :: [{atom(), non_neg_integer()}]
   example placings do
-    for {name, statement} <- statements() do
-      read = placing(statement)
+    counts =
+      for {name, statement} <- statements() do
+        read = placing(statement)
 
-      assert Enum.all?(read, fn {cell, at} -> at == {:ok, cell} end),
-             "#{name} lays a sequence it does not hold: #{inspect(read)}"
+        assert Enum.all?(read, fn {cell, at} -> at == {:ok, cell} end),
+               "#{name} lays a sequence it does not hold: #{inspect(read)}"
 
-      {name, length(read)}
-    end
+        {name, length(read)}
+      end
+
+    assert Enum.any?(counts, fn {_name, count} -> count > 0 end),
+           "placement checks examined no bank cells"
+
+    counts
   end
 
   @doc "I am one witness swept: the moves the oracle believed, and the moves it should not have."
@@ -202,9 +208,8 @@ defmodule Examples.EForgery do
 
     for stand <- lay.stands,
         {_relation, tuple} = stand.fact,
-        {value, slot = %Slot{allocation: {:bank, bank, {:at, :x, mul, _add}}}} <-
+        {value, slot = %Slot{allocation: {:bank, bank, _extent}}} <-
           Enum.zip(tuple, Alloc.member(alloc, stand.member).slots),
-        mul > 0,
         is_list(value),
         {cell, p} <- Enum.with_index(value),
         column = Ast.column(Lay.at(slot, p), stand.column),
@@ -217,7 +222,7 @@ defmodule Examples.EForgery do
   defp freed(statement = %Statement{args: args}) do
     [root | _rest] = Statement.alloc(statement).members
 
-    for {:_, %Slot{allocation: {:bank, owner, _at}}} <-
+    for {:_, %Slot{allocation: {:bank, owner, _extent}}} <-
           Enum.zip(args, root.slots),
         do: owner
   end
@@ -311,7 +316,7 @@ defmodule Examples.EForgery do
     root = Alloc.root(alloc)
 
     banks =
-      for %Slot{allocation: {:bank, owner, _at}} <- root.slots,
+      for %Slot{allocation: {:bank, owner, _extent}} <- root.slots,
           do: owner
 
     for name <- [root.name | banks], do: Alloc.presence(alloc, name)
