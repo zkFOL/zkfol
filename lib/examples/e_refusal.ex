@@ -18,6 +18,29 @@ defmodule Examples.ERefusal do
     said
   end
 
+  @doc "A refusal stops mapping before later elements can be visited."
+  @spec mapping_stops_at_first_refusal() :: Refusal.t()
+  example mapping_stops_at_first_refusal do
+    refusal = {:no_answer, %{}}
+    parent = self()
+
+    assert {:error, ^refusal} =
+             Refusal.map([1, 2, 3], fn value ->
+               send(parent, {:visited, value})
+
+               if value == 2 do
+                 {:error, refusal}
+               else
+                 {:ok, value * 10}
+               end
+             end)
+
+    assert_received {:visited, 1}
+    assert_received {:visited, 2}
+    refute_received {:visited, 3}
+    refusal
+  end
+
   @doc "One refusal per clause of the index, detailed as its producer details it."
   @spec detailed() :: [Refusal.t()]
   def detailed do
