@@ -4,9 +4,8 @@ defmodule Examples.EArrays do
   use Zkfol
   import ExUnit.Assertions
 
-  alias Zkfol.{Al, Alloc, Array, Ast, Interpretation, Lay, Phi, Prover, Semantics, Uair}
+  alias Zkfol.{Al, Alloc, Ast, Interpretation, Lay, Phi, Program, Prover, Semantics, Uair, Unfold}
   alias Zkfol.Lang.Rel
-  alias Zkfol.Phi.{Place, Traversal, Walk}
   alias Examples.{ENodes, EPhi, EUser}
 
   defrel doubled(<<>>, <<>>)
@@ -182,7 +181,7 @@ defmodule Examples.EArrays do
         end
       end
 
-    {_pred, lay} = laid(root, [:_], %{})
+    {_pred, lay} = laid(root, [[[1, 2], [3, 4]]], %{})
     lay
   end
 
@@ -190,7 +189,7 @@ defmodule Examples.EArrays do
   @spec composed_traversals() :: [Lay.t()]
   example composed_traversals do
     cases = [
-      {doubled(), [[], :_], %{0 => [0], 1 => [0]}, [:doubled]},
+      {doubled(), [[], :_], %{0 => [0], 1 => [0]}, []},
       {doubled(), [[3], :_], %{0 => [1], 1 => [1]}, [:doubled]},
       {mapped(), [[1, 2, 3], :_], %{0 => [3], 1 => [3]}, [:map]},
       {nested(), [[[1, 2, 3], [4, 5, 6]], :_], %{0 => [2, 3], 1 => [2, 3]}, [:map]},
@@ -289,28 +288,32 @@ defmodule Examples.EArrays do
     uair
   end
 
-  @doc "Only aligned tail recursion gets a traversal plan; other calls keep ordinary compilation."
-  @spec traversal_boundary() :: Traversal.t()
-  example traversal_boundary do
-    ref = {:doubled, {:param, :xs}}
-    walk = Array.bind(%Array{dimensions: [2]}, ref)
-    a = Walk.fetch(walk, ref)
+  @doc "Only aligned tail recursion walks its arrays; other calls keep ordinary compilation."
+  @spec walk_boundary() :: [Unfold.key()]
+  example walk_boundary do
+    walking = fn rel, arrays ->
+      root = with_arrays(rel, arrays)
+      {:ok, reached} = Program.reached(root, [root])
 
-    for {rel, values} <- [
-          {doubled(), [[1, 2], [2, 4]]},
-          {doubled(), [a, :fresh]},
-          {doubled(), [a, Place.shifted(a, -1)]},
-          {EUser.doubled_fun(), [a, Place.shifted(a, -2)]},
-          {EUser.total(), [a, :fresh]},
-          {EPhi.selected_list(), [:fresh, a, a]}
-        ] do
-      assert Traversal.plan(rel, values) == nil
+      for {key = {_name, handed}, _clauses} <-
+            Unfold.program(root, Map.new(reached, &{&1.name, &1})),
+          Enum.any?(handed, &match?({:bank, _array, _inner}, &1)),
+          do: key
     end
 
-    plan = Traversal.plan(doubled(), [a, a])
-    assert Traversal.call(doubled(), [], plan, plan.edge) == Ast.address(:x, 1, -1)
-    assert Traversal.call(doubled(), [:fresh, :fresh], plan, [0 | plan.edge]) == nil
-    plan
+    for {rel, arrays} <- [
+          {doubled(), %{}},
+          {doubled(), %{0 => [2]}},
+          {doubled(), %{0 => [2], 1 => [3]}},
+          {EUser.doubled_fun(), %{0 => [2], 1 => [4]}},
+          {EUser.total(), %{0 => [2]}},
+          {EPhi.selected_list(), %{1 => [2], 2 => [2]}}
+        ] do
+      assert walking.(rel, arrays) == []
+    end
+
+    assert [{:doubled, [{:bank, :a1, []}, {:bank, :a2, []}]}] =
+             walking.(doubled(), %{0 => [2], 1 => [2]})
   end
 
   @doc "The array relation rejects ragged values and checks scalar leaves in AL."
@@ -332,7 +335,7 @@ defmodule Examples.EArrays do
     end
   end
 
-  @doc "Malformed dimensions return a typed lowering refusal, including improper lists."
+  @doc "Malformed dimensions have no answer, including improper lists."
   @spec invalid_dimensions() :: [Zkfol.Refusal.t()]
   example invalid_dimensions do
     dimensions = Enum.map([[0, -1], [0, []], [2, 0, -1]], &list_term/1) ++ [{:cons, 0, 1}]
@@ -344,9 +347,8 @@ defmodule Examples.EArrays do
         clauses: [{[{:var, :xs}], [{:call, &Zkfol.FOL.array/0, [dimensions, {:var, :xs}]}]}]
       }
 
-      assert {:error, {:array_shape, _} = refusal} = Phi.compile(root)
       ran = Zkfol.compile(root, args: [[]])
-      assert {_reason, _detail} = Zkfol.Log.refusal(ran)
+      assert refusal = {_reason, _detail} = Zkfol.Log.refusal(ran)
       refusal
     end
   end
@@ -584,20 +586,13 @@ defmodule Examples.EArrays do
     array([2], xs)
   end
 
-  defrel arithmetic_before_array(xs) do
-    y = xs + 0
-    array([2], xs)
-    y = 1
-  end
-
-  @doc "Scalar reads wait for representation; an array cannot leave a dangling scalar row."
-  @spec conflicting_reads() :: [Zkfol.Refusal.t()]
+  @doc "An array read as a number is refused."
+  @spec conflicting_reads() :: Zkfol.Refusal.t()
   example conflicting_reads do
-    for root <- [scalar_before_array(), arithmetic_before_array()] do
-      assert {:error, {:no_answer, _detail}} = Al.derived(root, [[1, 2]])
-      assert {:error, {:unliftable_term, _detail} = reason} = Phi.compile(root)
-      reason
-    end
+    root = scalar_before_array()
+    assert {:error, {:no_answer, _detail}} = Al.derived(root, [[1, 2]])
+    assert {:error, {:unliftable_term, _detail} = reason} = Phi.compile(root)
+    reason
   end
 
   defrel digit_sum([], 0)

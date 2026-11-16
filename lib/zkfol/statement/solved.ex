@@ -14,6 +14,6 @@ defmodule Zkfol.Statement.Solved do
     field(:pred, Ast.pred())
     field(:lay, Lay.t())
     field(:claims, [Interpretation.claim()], default: [], enforce: false)
-    field(:lowering, Zkfol.Phi.Walk.t() | nil, default: nil, enforce: false)
+    field(:lowering, [Zkfol.Phi.Clause.t()] | nil, default: nil, enforce: false)
   end
 end

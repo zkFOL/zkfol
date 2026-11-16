@@ -311,9 +311,9 @@ defmodule Zkfol.Lay do
       {:empty, _queue} ->
         %{lay | stands: Enum.reverse(lay.stands)}
 
-      {{:value, {{_relation, tuple} = fact, name, aim}}, rest} ->
+      {{:value, {fact, name, aim}}, rest} ->
         member = index.members[name]
-        {column, taken} = placed(aim, member, tuple, Map.get(occupied, name, %{}))
+        {column, taken} = placed(aim, Map.get(occupied, name, %{}))
         # Pointer calls share one fact; fixed addresses still require their own copies.
         key = {name, fact, if(is_integer(aim), do: column, else: :free)}
 
@@ -353,12 +353,13 @@ defmodule Zkfol.Lay do
     end
   end
 
-  @spec source_value(
-          {:argument, non_neg_integer()} | {:variable, atom()},
-          Derivation.fact(),
-          map()
-        ) :: term()
+  @spec source_value(Alloc.binding(), Derivation.fact(), map()) :: term()
   defp source_value({:argument, k}, fact, index), do: elem(index.arguments[fact], k)
+
+  # A passed relation is AL's compound of the method and its fixed arguments.
+  defp source_value({:fixed, k, i}, fact, index),
+    do: Enum.at(elem(index.arguments[fact], k).args, i)
+
   defp source_value({:variable, name}, fact, index), do: Map.fetch!(index.bindings[fact], name)
 
   # A call's source path follows the derivation through any wrappers that were inlined.
@@ -399,21 +400,10 @@ defmodule Zkfol.Lay do
          do: Map.get(positions, {callee, fact}, 1)
   end
 
-  # A fact no site addressed stands where its steps put its count, else at a vacant column.
-  @spec placed(aim(), Member.t(), [term()], map()) :: {pos_integer(), map()}
-  defp placed(column, _member, _tuple, taken) when is_integer(column), do: {column, taken}
-
-  defp placed({:free, near}, %Member{steps: steps}, tuple, taken) do
-    with {j, origin} <- steps,
-         count when is_integer(count) <- count_of(Enum.at(tuple, j)),
-         do: {count - origin, taken},
-         else: (_uncounted -> vacant(near, taken))
-  end
-
-  @spec count_of(term()) :: integer() | nil
-  defp count_of(q) when is_integer(q), do: q
-  defp count_of(cells) when is_list(cells), do: length(cells)
-  defp count_of(_open), do: nil
+  # A fact no site addressed stands at a vacant column.
+  @spec placed(aim(), map()) :: {pos_integer(), map()}
+  defp placed(column, taken) when is_integer(column), do: {column, taken}
+  defp placed({:free, near}, taken), do: vacant(near, taken)
 
   # Each occupied position points toward a vacancy; searches compress the traversed path.
   @spec vacant(pos_integer(), map()) :: {pos_integer(), map()}
@@ -442,17 +432,6 @@ defmodule Zkfol.Lay do
   # The allocation determines placement: scalar, term identity, bank, or no storage.
   @spec spread({Slot.t(), term()}, pos_integer(), Alloc.t()) ::
           [{{pos_integer(), pos_integer()}, term()}]
-  # A closure is AL's compound of the method and its fixed arguments; those go to the rows.
-  defp spread({%Slot{allocation: {:rel, _name, rows}}, %AL.Goal.Compound{args: fixed}}, x, alloc),
-    do: for({value, row} <- Enum.zip(fixed, rows), do: {{Alloc.row(alloc, row), x}, value})
-
-  defp spread({%Slot{allocation: {:record, rows}}, values}, x, alloc),
-    do:
-      for(
-        {row, value} <- Enum.zip(rows, List.flatten(List.wrap(values))),
-        do: {{Alloc.row(alloc, row), x}, value}
-      )
-
   defp spread({%Slot{allocation: {:cell, ref}}, value}, x, alloc),
     do: [{{Alloc.row(alloc, ref), x}, value}]
 

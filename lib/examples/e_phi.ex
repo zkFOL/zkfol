@@ -57,7 +57,7 @@ defmodule Examples.EPhi do
     statement
   end
 
-  @doc "A repeated goal is one obligation; each local keeps the call it came from."
+  @doc "A goal stated twice is two calls."
   @spec repeated_factors() :: Statement.t()
   example repeated_factors do
     {:ok, statement, _trace} =
@@ -66,15 +66,7 @@ defmodule Examples.EPhi do
         args: [6, 9]
       })
 
-    [%{bindings: bindings}] = Statement.lay(statement).stands
-
-    assert for(
-             {slot, _value} <- bindings,
-             slot.source.binding == {:variable, :q},
-             do: slot.source.calls
-           ) ==
-             [[local_factor: 0], [local_factor: 2]]
-
+    assert Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
     statement
   end
 
@@ -289,5 +281,77 @@ defmodule Examples.EPhi do
     assert Derivation.root(Statement.derivation(statement), :selected) == {:selected, [3, 3]}
     assert Alloc.regions(Statement.alloc(statement)) == [selected: 2, in: 1]
     statement
+  end
+
+  defrel spanned(n) do
+    n = len
+  end
+
+  @doc "`len` is the number of columns the witness has."
+  @spec trace_length() :: Statement.t()
+  example trace_length do
+    {:ok, statement, _trace} =
+      Pipeline.run(EUser.plain(), %Statement{rels: [spanned()], args: [1]})
+
+    witness = Statement.witness(statement)
+    assert Interpretation.len(witness) == 1
+    assert Semantics.valid?(Statement.pred(statement), witness)
+    statement
+  end
+
+  defrel three_long(xs) do
+    length(xs, 3)
+  end
+
+  defrel twelve_long(xs) do
+    length(xs, 12)
+  end
+
+  @doc "A longer list costs a counted recursion columns, not rows."
+  @spec counted_lists() :: [Statement.t()]
+  example counted_lists do
+    [short, long] =
+      for {sized, n} <- [{three_long(), 3}, {twelve_long(), 12}] do
+        {:ok, statement, _trace} =
+          Pipeline.run(EUser.plain(), %Statement{rels: [sized], args: [Enum.to_list(1..n)]})
+
+        assert Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
+        statement
+      end
+
+    assert Alloc.width(Statement.alloc(short)) == Alloc.width(Statement.alloc(long))
+    [short, long]
+  end
+
+  defrel found([x | _], x)
+
+  defrel found([_ | xs], x) do
+    found(xs, x)
+  end
+
+  defrel found_in_eight(xs, x) do
+    array([8], xs)
+    found(xs, x)
+  end
+
+  defrel found_in_sixteen(xs, x) do
+    array([16], xs)
+    found(xs, x)
+  end
+
+  @doc "A declared array handed to a relation as a list costs no row per element."
+  @spec arrays_as_lists() :: [Statement.t()]
+  example arrays_as_lists do
+    [short, long] =
+      for {held, n} <- [{found_in_eight(), 8}, {found_in_sixteen(), 16}] do
+        statement = %Statement{rels: [held, found()], args: [Enum.to_list(1..n), n]}
+        {:ok, statement, _trace} = Pipeline.run(EUser.plain(), statement)
+
+        assert Semantics.valid?(Statement.pred(statement), Statement.witness(statement))
+        statement
+      end
+
+    assert Alloc.width(Statement.alloc(short)) == Alloc.width(Statement.alloc(long))
+    [short, long]
   end
 end

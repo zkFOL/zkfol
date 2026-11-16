@@ -11,7 +11,7 @@ defmodule Zkfol.Nodes do
   """
   use TypedStruct
   alias Zkfol.{Alloc, Ast, Interpretation}
-  alias Zkfol.Phi.{Place, Value}
+  alias Zkfol.Phi.{Match, Place}
 
   require Place
 
@@ -134,7 +134,7 @@ defmodule Zkfol.Nodes do
   defp node(id, scalar) do
     Ast.conj([
       Ast.eq(Place.read(:tag, id), 1),
-      Ast.eq(Place.read(:value, id), Value.scalar(scalar))
+      Ast.eq(Place.read(:value, id), Match.scalar(scalar))
     ])
   end
 
@@ -275,7 +275,7 @@ defmodule Zkfol.Nodes do
     for i <- 0..(len - 1)//1, do: ground(Place.slice(laid, i), x, ctx)
   end
 
-  defp ground(value, x, ctx), do: eval(Value.scalar(value), x, ctx)
+  defp ground(value, x, ctx), do: eval(Match.scalar(value), x, ctx)
 
   defp eval(expr, x, ctx), do: Zkfol.Semantics.eval(expr, ctx.len, x, &read(&1, &2, ctx))
 end

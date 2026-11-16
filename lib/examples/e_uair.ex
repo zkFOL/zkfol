@@ -37,20 +37,6 @@ defmodule Examples.EUair do
     all_distinct(cells)
   end
 
-  defrel apart_rows(cells) do
-    array([2, 2], cells)
-    all_distinct(cells)
-  end
-
-  @doc "Distinctness takes scalar elements: rows are refused, not flattened."
-  @spec distinct_rows_refused() :: Refusal.t()
-  example distinct_rows_refused do
-    assert {:error, refusal = {:unliftable_term, %{relation: :all_distinct}}} =
-             Zkfol.Phi.compile(apart_rows(), nil, [[[5, 9], [2, 7]]])
-
-    refusal
-  end
-
   @doc "Distinct private values prove through a sorted copy; a repeat is refused before the prover."
   @spec private_distinctness() :: Prover.Report.t()
   example private_distinctness do

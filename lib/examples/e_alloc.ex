@@ -182,16 +182,14 @@ defmodule Examples.EAlloc do
     end
   end
 
-  @doc "An impossible clause owns no callee or value rows, wherever the contradiction occurs."
-  @spec impossible_clauses_allocate_nothing() :: [Alloc.t()]
-  example impossible_clauses_allocate_nothing do
+  @doc "An impossible clause is dead, wherever the contradiction occurs."
+  @spec impossible_clauses() :: [Zkfol.Ast.pred()]
+  example impossible_clauses do
     for rel <- [impossible_after(), impossible_before()] do
-      {:ok, pred, alloc} = Phi.compile(rel)
-      assert Alloc.refs(alloc) == [{:in, rel.name}]
-      linked = Alloc.link(pred, alloc)
-      assert Zkfol.Semantics.valid?(linked, Interpretation.new([[0]]))
-      refute Zkfol.Semantics.valid?(linked, Interpretation.new([[1]]))
-      alloc
+      {:ok, pred, _alloc} = Phi.compile(rel)
+      present = {:eq, {:cell, {:in, rel.name}}, 1}
+      refute Zkfol.Ast.reduce(pred, false, &(&2 or &1 == present))
+      pred
     end
   end
 
