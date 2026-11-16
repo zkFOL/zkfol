@@ -7,6 +7,24 @@ defmodule Examples.ERefusal do
 
   alias Zkfol.Refusal
 
+  @doc "A forbidden nil is still an offender, and later elements remain unvisited."
+  @spec refute_detects_nil() :: Refusal.t()
+  example refute_detects_nil do
+    refusal = {:no_answer, %{}}
+    parent = self()
+
+    assert {:error, ^refusal} =
+             Refusal.refute([1, nil, 3], fn value ->
+               send(parent, {:visited, value})
+               is_nil(value)
+             end, fn nil -> refusal end)
+
+    assert_received {:visited, 1}
+    assert_received {:visited, nil}
+    refute_received {:visited, 3}
+    refusal
+  end
+
   @spec every_reason_reads_as_prose() :: [String.t()]
   example every_reason_reads_as_prose do
     said = for refusal <- detailed(), do: Refusal.message(refusal)
