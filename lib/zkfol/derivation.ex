@@ -26,13 +26,13 @@ defmodule Zkfol.Derivation do
   @typedoc "The relations by the method each is installed as: its name and arity."
   @type methods :: %{atom() => {atom(), non_neg_integer()}}
 
-  @spec of(AL.JAM.State.t(), methods(), boolean()) :: t()
-  def of(state = %AL.JAM.State{active_choicepoint: %{store: store}}, names, len?) do
+  @spec of(AL.JAM.State.t(), methods()) :: t()
+  def of(state = %AL.JAM.State{active_choicepoint: %{store: store}}, names) do
     nodes =
       state
       |> AL.Trace.derivation_tree()
       |> calls()
-      |> Enum.flat_map(&walk(&1, names, len?, store))
+      |> Enum.flat_map(&walk(&1, names, store))
 
     facts = nodes |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
     digested = Map.new(nodes)
@@ -75,17 +75,17 @@ defmodule Zkfol.Derivation do
     end)
   end
 
-  @spec walk({term(), map()}, methods(), boolean(), map()) :: [
+  @spec walk({term(), map()}, methods(), map()) :: [
           {fact(), {[fact()], non_neg_integer() | nil, %{atom() => term()}}}
         ]
-  defp walk({label, answer}, names, len?, store) do
+  defp walk({label, answer}, names, store) do
     kids = calls(answer.children)
-    below = Enum.flat_map(kids, &walk(&1, names, len?, store))
+    below = Enum.flat_map(kids, &walk(&1, names, store))
 
-    if fact?(label, names, len?) do
+    if fact?(label, names) do
       consumed =
         for {kid, kid_answer} <- kids,
-            fact?(kid, names, len?),
+            fact?(kid, names),
             do: fact_of(kid, kid_answer.derived, names, store)
 
       {_self, _method, args} = label
@@ -99,15 +99,15 @@ defmodule Zkfol.Derivation do
   end
 
   # I match a journal node to a relation by its method name and arity.
-  @spec fact?(term(), methods(), boolean()) :: boolean()
-  defp fact?({_self, m, args}, names, len?) do
+  @spec fact?(term(), methods()) :: boolean()
+  defp fact?({_self, m, args}, names) do
     case Map.get(names, m) do
-      {_name, arity} -> arity == length(args) - 1 - if(len?, do: 1, else: 0)
+      {_name, arity} -> arity == length(args) - 1
       nil -> false
     end
   end
 
-  defp fact?(_label, _names, _len?), do: false
+  defp fact?(_label, _names), do: false
 
   @spec fact_of(term(), map() | nil, methods(), map()) :: fact()
   defp fact_of({_self, m, args}, derived, names, store) do

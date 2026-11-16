@@ -85,7 +85,8 @@ defmodule Zkfol.FOL do
 
   defrel split(n, [h | t], [h | p], rest) do
     n > 0
-    split(n - 1, t, p, rest)
+    n1 = n - 1
+    split(n1, t, p, rest)
   end
 
   defrel heads([], [], [])
