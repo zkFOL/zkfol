@@ -41,15 +41,14 @@ defmodule Zkfol.Interpretation do
 
   @doc "I return `{:ok, C@i,x}`, or `:error` when the cell lies outside me."
   @spec fetch(t(), pos_integer(), pos_integer()) :: {:ok, integer()} | :error
-  def fetch(%__MODULE__{rows: rows}, i, x) do
-    with true <- i in 1..tuple_size(rows)//1,
-         row = elem(rows, i - 1),
-         true <- x in 1..tuple_size(row)//1 do
-      {:ok, elem(row, x - 1)}
-    else
-      _outside -> :error
-    end
-  end
+  def fetch(%__MODULE__{rows: rows}, i, x) when i in 1..tuple_size(rows)//1,
+    do: cell(elem(rows, i - 1), x)
+
+  def fetch(_itp, _i, _x), do: :error
+
+  @spec cell(tuple(), integer()) :: {:ok, integer()} | :error
+  defp cell(row, x) when x in 1..tuple_size(row)//1, do: {:ok, elem(row, x - 1)}
+  defp cell(_row, _x), do: :error
 
   @doc "I am me with C@i,x replaced."
   @spec put(t(), pos_integer(), pos_integer(), integer()) :: t()
