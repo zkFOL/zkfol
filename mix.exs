@@ -4,7 +4,7 @@ defmodule Zkfol.MixProject do
   def project do
     [
       app: :zkfol,
-      version: "0.6.1",
+      version: "0.7.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       dialyzer: [plt_add_apps: [:ex_unit, :crypto, :mnesia]],

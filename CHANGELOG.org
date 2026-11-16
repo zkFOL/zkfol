@@ -1,3 +1,25 @@
+* V0.7.0
+** Features
+- Explicit array dimensions with ~array(dimensions, value)~; shared
+  traversals and transposed views reuse the same array storage.
+- Passed relations support captured arguments and callbacks bound after
+  their use.
+- Lists are no longer optimized in favor of a simpler compiler with arrays.
+** Breaking changes
+- Anonymous relations use ~rel do ... end~ instead of ~rel :name do ... end~.
+- Pass relations as constructor calls: ~each(xs, natural())~, not
+  ~each(xs, natural)~. Imports and aliases follow Elixir's rules;
+  ~use Zkfol~ brings in the standard relations.
+- Call a locally bound relation with ~f.(x, y)~. A relation passed as
+  a head parameter still supports ~f(x, y)~.
+- Explicit ~gt~, ~gte~, ~lt~, ~lte~ and ~neq~ calls take two arguments;
+  ~mod(e, m, r)~ takes three. Slack and quotient variables are now local.
+- Custom ~@al~ definitions use AL text, e.g. ~@al ">= X 0"~,
+  instead of quoted Elixir expressions.
+  + This comes with the new AL syntax
+** Dependencies
+- AL 0.6.1.
+
 * V0.6.1
 This release is mostly a bug fix release. We do offer 2 concrete
 features. Namely proof exporting and some string literals.
