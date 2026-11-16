@@ -7,26 +7,21 @@ defmodule Zkfol.Ast do
       e   ::= q | e + e | e * e | len(C) | X | C_i(X) | C_i(mX + a) | C_i(C_j(X))
   """
 
-  @typedoc "A polynomial over some leaf: what `add/2` and `mul/2` build, whatever the leaf is."
   @type poly(leaf) ::
           leaf
           | integer()
           | {:add, poly(leaf), poly(leaf)}
           | {:mul, poly(leaf), poly(leaf)}
 
-  @typedoc """
-  A row reference: a bare row post-link, {symbol, which} before Alloc numbers it, or a
-  named row the emission adds beside the witness.
-  """
   @type row_ref :: pos_integer() | atom() | {atom(), term()}
 
-  @typedoc "What an address counts from: my own column, or the one a row holds."
+  @typedoc "The current column or where the row is"
   @type address_base :: :x | {:cell, row_ref()}
 
-  @typedoc "Where a read lands: the column `mul * base + add`."
+  @typedoc "the column `mul * base + add`."
   @type address :: {:at, address_base(), integer(), integer()}
 
-  @typedoc "The leaves Figure 2's polynomials stand on."
+  @typedoc "The leaves Figure 2's polynomials"
   @type ep_leaf ::
           :x
           | :len
@@ -51,19 +46,19 @@ defmodule Zkfol.Ast do
 
   @type pred :: pred(term_t())
 
-  @doc "I am the index variable X: the current column."
+  @doc "I the current column."
   @spec x() :: term_t()
   def x, do: :x
 
-  @doc "I am len(C): the number of columns."
+  @doc "The number of columns"
   @spec len() :: term_t()
   def len, do: :len
 
-  @doc "I am C_i(X): row `i` at the current column, the row named or already linked."
+  @doc "Row `i` at the current column"
   @spec cell(row_ref()) :: term_t()
   def cell(i), do: {:cell, i}
 
-  @doc "I am C_i(C_j(X)): row `i` at the column stored in row `j` of the current column."
+  @doc "Row `i` at the column stored in row `j` of the current column."
   @spec cell(row_ref(), row_ref()) :: term_t()
   def cell(i, j), do: {:cell, i, j}
 
@@ -71,28 +66,27 @@ defmodule Zkfol.Ast do
   @spec address(address_base(), integer(), integer()) :: address()
   def address(base, mul, add), do: {:at, base, mul, add}
 
-  @doc "I am C_i(m·b + a): row `i` at the column the affine term names, `read/1`'s inverse."
+  @doc "Row `i` at the column the affine term names, `read/1`'s inverse."
   @spec at(row_ref(), address_base(), integer(), integer()) :: term_t()
   def at(i, :x, 1, 0), do: cell(i)
   def at(i, {:cell, j}, 1, 0), do: cell(i, j)
   def at(i, base, mul, add), do: {:cell, i, address(base, mul, add)}
 
-  @typedoc "A read decoded: the row, and the address its column is."
+  @typedoc "The row, and the address its column is."
   @type read :: {row_ref(), address()}
 
-  @doc "I decode a read, whichever of the three spellings wrote it; nothing else is a read."
   @spec read(term_t()) :: read() | nil
   def read({:cell, i}), do: {i, {:at, :x, 1, 0}}
   def read({:cell, i, {:at, base, mul, add}}), do: {i, {:at, base, mul, add}}
   def read({:cell, i, j}), do: {i, {:at, {:cell, j}, 1, 0}}
   def read(_node), do: nil
 
-  @doc "I am the column an address names, as a term: `m·b + a` over the base."
+  @doc "I am the column an address names: `m·b + a`."
   @spec naming(address()) :: ep()
   def naming({:at, :x, mul, add}), do: add(mul(x(), mul), add)
   def naming({:at, {:cell, j}, mul, add}), do: add(mul(cell(j), mul), add)
 
-  @doc "I am the column an address names, given what its base holds: `m·b + a`."
+  @doc "I am the column an address names: `m·b + a`."
   @spec column(address(), integer()) :: integer()
   def column({:at, _base, mul, add}, base), do: mul * base + add
 
